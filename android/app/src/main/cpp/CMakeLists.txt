@@ -20,6 +20,10 @@ set(RUNTIME
 if(LJ_GEN_DIR)
     message(STATUS "Lazy Jones: building with the recompiled game from ${LJ_GEN_DIR}")
     set(GAME ${LJ_GEN_DIR}/lj_recomp.c ${LJ_GEN_DIR}/lj_game_data.c ${LJ_ROOT}/runtime/lj_game.c)
+    # made by the Gradle task generateGameSources before the native build;
+    # CMake can be configured earlier (Android Studio sync)
+    set_source_files_properties(${LJ_GEN_DIR}/lj_recomp.c ${LJ_GEN_DIR}/lj_game_data.c
+                                PROPERTIES GENERATED TRUE)
 else()
     message(WARNING "Lazy Jones: no game sources, building the app without the game")
     set(GAME ${LJ_ROOT}/runtime/recomp_stub.c ${LJ_ROOT}/runtime/nogame.c)

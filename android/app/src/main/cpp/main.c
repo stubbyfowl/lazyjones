@@ -61,6 +61,8 @@ typedef struct {
     AInputQueue *queue;
     /* input state (under mu) */
     uint32_t keys;
+    uint32_t latched; /* keys pressed since the last snapshot (short taps) */
+    int fire_touched; /* the fire half was touched since the last snapshot */
     float ax, ay, hx, hy;
     touch_t touch[MAX_POINTERS];
     int taps;
@@ -409,6 +411,10 @@ static void *game_main(void *arg)
     const double period = 1.0 / LJ_FRAME_HZ;
     double next = now_sec();
     int running = 0;
+    /* key presses not yet seen by a frame: a tap shorter than one frame
+     * (down and up between two snapshots) still counts as one press */
+    uint32_t pending = 0;
+    int pending_touch_fire = 0;
     for (;;) {
         pthread_mutex_lock(&a->mu);
         for (;;) {
@@ -439,7 +445,11 @@ static void *game_main(void *arg)
         /* input snapshot */
         fe_input_t in;
         memset(&in, 0, sizeof in);
-        in.held = a->keys;
+        pending |= a->latched;
+        a->latched = 0;
+        pending_touch_fire |= a->fire_touched;
+        a->fire_touched = 0;
+        in.held = a->keys | pending;
         in.ax = a->ax;
         in.ay = a->ay;
         if (a->hx < -0.5f) in.held |= FE_BTN_LEFT;
@@ -447,6 +457,10 @@ static void *game_main(void *arg)
         if (a->hy < -0.5f) in.held |= FE_BTN_UP;
         if (a->hy > 0.5f) in.held |= FE_BTN_DOWN;
         int menu = fe_menu_open();
+        if (menu)
+            pending_touch_fire = 0; /* touches are menu taps there */
+        else if (pending_touch_fire)
+            in.held |= FE_BTN_FIRE;
         if (!menu) {
             for (int i = 0; i < MAX_POINTERS; i++) {
                 touch_t *t = &a->touch[i];
@@ -512,6 +526,10 @@ static void *game_main(void *arg)
             push_audio();
             next += period;
             frames++;
+        }
+        if (frames > 0) {
+            pending = 0;
+            pending_touch_fire = 0;
         }
         if (t - next > 0.25)
             next = t; /* far behind (debugger, slow device): do not race */
@@ -637,12 +655,14 @@ static void touch_down(app_t *a, int32_t id, float x, float y)
     t->y0 = t->y = y;
     t->t0 = now_sec();
     float w = (float)(a->win_w > 0 ? a->win_w : 1), h = (float)(a->win_h > 0 ? a->win_h : 1);
-    if (x > w * 0.85f && y < h * 0.15f)
+    if (x > w * 0.85f && y < h * 0.15f) {
         t->role = 3;
-    else if (x < w * 0.5f)
+    } else if (x < w * 0.5f) {
         t->role = 1;
-    else
+    } else {
         t->role = 2;
+        a->fire_touched = 1;
+    }
 }
 
 static void touch_up(app_t *a, int32_t id, int cancelled)
@@ -676,8 +696,10 @@ static int handle_input(app_t *a, AInputEvent *e)
         if (!b)
             return 0; /* volume keys etc. go to the system */
         pthread_mutex_lock(&a->mu);
-        if (action == AKEY_EVENT_ACTION_DOWN)
+        if (action == AKEY_EVENT_ACTION_DOWN) {
             a->keys |= b;
+            a->latched |= b;
+        }
         else if (action == AKEY_EVENT_ACTION_UP)
             a->keys &= ~b;
         pthread_mutex_unlock(&a->mu);
@@ -851,6 +873,8 @@ static void on_resume(ANativeActivity *act)
 static void clear_input(app_t *a)
 {
     a->keys = 0;
+    a->latched = 0;
+    a->fire_touched = 0;
     a->ax = a->ay = a->hx = a->hy = 0.0f;
     for (int i = 0; i < MAX_POINTERS; i++)
         a->touch[i].active = 0;
