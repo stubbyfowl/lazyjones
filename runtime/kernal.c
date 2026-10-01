@@ -703,88 +703,111 @@ static void screen_print_body(uint8_t c)
 
 /* ---- keyboard (SCNKEY, $EA87) ------------------------------------------ */
 
-static void scnkey(void)
+/* Scan the keyboard like the KERNAL: sets SHFLAG ($028D), SFDX ($CB),
+ * LSTX ($C5), puts new characters into the buffer and leaves $DC00 = $7F.
+ * Returns an estimate of the cycles the ROM routine takes. */
+static unsigned scnkey(void)
 {
-    kpoke(0x028D, 0);
-    uint8_t sfdx = 0x40;
-    kpoke(0xDC00, 0x00);
-    uint8_t any = kpeek(0xDC01);
-    if (any != 0xFF) {
-        uint16_t keytab = KT_NORMAL;
-        uint8_t key = 0;
-        uint8_t colsel = 0xFE;
-        for (int col = 0; col < 8; col++) {
-            kpoke(0xDC00, colsel);
-            uint8_t rows = kpeek(0xDC01);
-            for (int r = 0; r < 8; r++, key++) {
-                if (rows & (1 << r))
-                    continue;
-                uint8_t code = kpeek((uint16_t)(keytab + key));
-                if (code < 5 && code != 3)
-                    kpoke(0x028D, (uint8_t)(kpeek(0x028D) | code));
-                else
-                    sfdx = key;
-            }
-            colsel = (uint8_t)((colsel << 1) | 1);
-        }
-    }
-    kpoke(0xCB, sfdx);
-    /* $EB48: choose the decode table from the shift pattern */
-    uint8_t shfl = kpeek(0x028D);
-    int skip_decode = 0;
-    if (shfl == 3) {
-        if (shfl != kpeek(0x028E) && !(kpeek(0x0291) & 0x80))
-            kpoke(0xD018, (uint8_t)(kpeek(0xD018) ^ 0x02));
-        skip_decode = 0;
-    }
     static const uint16_t tabs[4] = {KT_NORMAL, KT_SHIFT, KT_CBM, KT_CTRL};
-    if (shfl != 3) {
-        unsigned i = (unsigned)shfl;
-        if (i >= 4)
-            i = 3;
-        kpoke(0xF5, (uint8_t)tabs[i]);
-        kpoke(0xF6, (uint8_t)(tabs[i] >> 8));
-    }
-    (void)skip_decode;
-    /* $EAE0: key to buffer with repeat handling */
-    uint8_t y = kpeek(0xCB);
-    uint8_t x = kpeek((uint16_t)(kpeek16(0xF5) + y));
-    int store = 0;
-    if (y != kpeek(0xC5)) {
-        kpoke(0x028C, 0x10);
-        store = 1;
-    } else {
-        uint8_t a = (uint8_t)(x & 0x7F);
-        uint8_t rpt = kpeek(0x028A);
-        int repeatable = (rpt & 0x80) ||
-                         (!(rpt & 0x40) && (a == 0x14 || a == 0x20 || a == 0x1D || a == 0x11));
-        if (repeatable) {
-            uint8_t d = kpeek(0x028C);
-            if (d) {
-                kpoke(0x028C, (uint8_t)(d - 1));
-            } else {
-                uint8_t k = (uint8_t)(kpeek(0x028B) - 1);
-                kpoke(0x028B, k);
-                if (k == 0) {
-                    kpoke(0x028B, 4);
-                    if (kpeek(0xC6) == 0)
-                        store = 1;
+    unsigned cycles = 40;
+    kpoke(0x028D, 0);
+    kpoke(0xCB, 0x40);
+    kpoke(0xDC00, 0x00);
+    uint8_t x = kpeek(0xDC01);
+    if (x != 0xFF) {
+        /* scan 8 columns, then one read with no column selected (key
+         * index 64, only joystick 1 can pull a row low there) */
+        kpoke(0xF5, (uint8_t)KT_NORMAL);
+        kpoke(0xF6, (uint8_t)(KT_NORMAL >> 8));
+        uint8_t colsel = 0xFE;
+        uint8_t key = 0;
+        kpoke(0xDC00, colsel);
+        for (;;) {
+            uint8_t rows = kpeek(0xDC01);
+            int done = 0;
+            for (int r = 0; r < 8; r++) {
+                if (!(rows & (1 << r))) {
+                    uint8_t code = kpeek((uint16_t)(KT_NORMAL + key));
+                    if (code < 5 && code != 3)
+                        kpoke(0x028D, (uint8_t)(kpeek(0x028D) | code));
+                    else
+                        kpoke(0xCB, key);
+                }
+                key++;
+                if (key >= 0x41) {
+                    done = 1;
+                    break;
                 }
             }
+            cycles += 140;
+            if (done)
+                break;
+            colsel = (uint8_t)((colsel << 1) | 1);
+            kpoke(0xDC00, colsel);
         }
-    }
-    if (store) {
-        kpoke(0xC5, kpeek(0xCB));
-        kpoke(0x028E, kpeek(0x028D));
-        if (x != 0xFF) {
-            uint8_t n = kpeek(0xC6);
-            if (n < kpeek(0x0289)) {
-                kpoke((uint16_t)(0x0277 + n), x);
-                kpoke(0xC6, (uint8_t)(n + 1));
+        /* $EB48: decode table from the shift pattern */
+        uint8_t shfl = kpeek(0x028D);
+        if (shfl == 3) {
+            if (shfl == kpeek(0x028E)) {
+                kpoke(0xDC00, 0x7F);
+                return cycles;
             }
+            if (!(kpeek(0x0291) & 0x80))
+                kpoke(0xD018, (uint8_t)(kpeek(0xD018) ^ 0x02));
+        } else {
+            unsigned i = shfl >= 4 ? 3u : shfl;
+            kpoke(0xF5, (uint8_t)tabs[i]);
+            kpoke(0xF6, (uint8_t)(tabs[i] >> 8));
+        }
+        /* $EAE0 */
+        uint8_t y = kpeek(0xCB);
+        x = kpeek((uint16_t)(kpeek16(0xF5) + y));
+        if (y != kpeek(0xC5)) {
+            kpoke(0x028C, 0x10);
+        } else {
+            uint8_t a = (uint8_t)(x & 0x7F);
+            uint8_t rpt = kpeek(0x028A);
+            if (!(rpt & 0x80)) {
+                if (rpt & 0x40)
+                    goto out;
+                if (a != 0x7F) {
+                    if (a != 0x14 && a != 0x20 && a != 0x1D && a != 0x11)
+                        goto out;
+                    goto repeat;
+                }
+                goto store;
+            }
+        repeat:
+            if (kpeek(0x028C) != 0) {
+                uint8_t d = (uint8_t)(kpeek(0x028C) - 1);
+                kpoke(0x028C, d);
+                if (d != 0)
+                    goto out;
+            }
+            {
+                uint8_t k = (uint8_t)(kpeek(0x028B) - 1);
+                kpoke(0x028B, k);
+                if (k != 0)
+                    goto out;
+            }
+            kpoke(0x028B, 4);
+            if (kpeek(0xC6) != 0)
+                goto out;
         }
     }
+store: /* $EB26 */
+    kpoke(0xC5, kpeek(0xCB));
+    kpoke(0x028E, kpeek(0x028D));
+    if (x != 0xFF) {
+        uint8_t n = kpeek(0xC6);
+        if (n < kpeek(0x0289)) {
+            kpoke((uint16_t)(0x0277 + n), x);
+            kpoke(0xC6, (uint8_t)(n + 1));
+        }
+    }
+out:
     kpoke(0xDC00, 0x7F);
+    return cycles;
 }
 
 /* $F69B */
@@ -866,13 +889,11 @@ int kernal_trap(uint8_t id)
         } else if (kpeek(0xC0) == 0) {
             kpoke(0x01, (uint8_t)(kpeek(0x01) & 0x1F));
         }
-        scnkey();
-        C.clk += 300;
+        C.clk += 120 + scnkey();
         return 1;
     }
     case T_SCNKEY:
-        scnkey();
-        C.clk += 250;
+        C.clk += scnkey();
         return 1;
     case T_UDTIM:
         udtim();
@@ -961,14 +982,22 @@ int kernal_trap(uint8_t id)
         return 1;
     }
     case T_RDTIM:
+        /* RDTIM falls through into SETTIM in the ROM (ends with CLI) */
         C.cpu.a = kpeek(0xA2);
         C.cpu.x = kpeek(0xA1);
         C.cpu.y = kpeek(0xA0);
+        SETNZ(C.cpu.y);
+        C.cpu.fi = 0;
+        C.clk += 30;
+        cpu_irq_recheck_delayed();
         return 1;
     case T_SETTIM:
         kpoke(0xA2, C.cpu.a);
         kpoke(0xA1, C.cpu.x);
         kpoke(0xA0, C.cpu.y);
+        C.cpu.fi = 0;
+        C.clk += 24;
+        cpu_irq_recheck_delayed();
         return 1;
     case T_PLOT:
         if (C.cpu.fc) {
