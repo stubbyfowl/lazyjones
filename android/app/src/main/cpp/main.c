@@ -12,6 +12,7 @@
 #include <dlfcn.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -23,6 +24,7 @@
 #include <android/looper.h>
 #include <android/native_activity.h>
 #include <android/native_window.h>
+#include <android/window.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 #include <jni.h>
@@ -195,15 +197,6 @@ static int gl_init_resources(void)
     glDisable(GL_BLEND);
     gx.gl_ready = 1;
     return 1;
-}
-
-static void gl_release_resources(void)
-{
-    if (gx.prog_plain) glDeleteProgram(gx.prog_plain);
-    if (gx.prog_sharp) glDeleteProgram(gx.prog_sharp);
-    if (gx.tex) glDeleteTextures(1, &gx.tex);
-    gx.prog_plain = gx.prog_sharp = gx.tex = 0;
-    gx.gl_ready = 0;
 }
 
 static void egl_destroy_surface(void)
@@ -596,9 +589,8 @@ static void *game_main(void *arg)
 
 /* ---- input ----------------------------------------------------------------- */
 
-static uint32_t key_button(int32_t code, int bfire_menu)
+static uint32_t key_button(int32_t code)
 {
-    (void)bfire_menu;
     switch (code) {
     case AKEYCODE_DPAD_UP: case AKEYCODE_W: return FE_BTN_UP;
     case AKEYCODE_DPAD_DOWN: case AKEYCODE_S: return FE_BTN_DOWN;
@@ -680,7 +672,7 @@ static int handle_input(app_t *a, AInputEvent *e)
     if (type == AINPUT_EVENT_TYPE_KEY) {
         int32_t code = AKeyEvent_getKeyCode(e);
         int32_t action = AKeyEvent_getAction(e);
-        uint32_t b = key_button(code, 0);
+        uint32_t b = key_button(code);
         if (!b)
             return 0; /* volume keys etc. go to the system */
         pthread_mutex_lock(&a->mu);
@@ -854,14 +846,22 @@ static void on_resume(ANativeActivity *act)
     set_immersive(act);
 }
 
+/* forget held keys, sticks and touches (caller holds a->mu): the release
+ * events can get lost when the app goes to the background */
+static void clear_input(app_t *a)
+{
+    a->keys = 0;
+    a->ax = a->ay = a->hx = a->hy = 0.0f;
+    for (int i = 0; i < MAX_POINTERS; i++)
+        a->touch[i].active = 0;
+}
+
 static void on_pause(ANativeActivity *act)
 {
     app_t *a = (app_t *)act->instance;
     pthread_mutex_lock(&a->mu);
     a->resumed = 0;
-    a->keys = 0;
-    for (int i = 0; i < MAX_POINTERS; i++)
-        a->touch[i].active = 0;
+    clear_input(a);
     pthread_cond_broadcast(&a->cv);
     pthread_mutex_unlock(&a->mu);
 }
@@ -887,7 +887,7 @@ static void on_focus(ANativeActivity *act, int has_focus)
     pthread_mutex_lock(&a->mu);
     a->focused = has_focus;
     if (!has_focus)
-        a->keys = 0;
+        clear_input(a);
     pthread_mutex_unlock(&a->mu);
     if (has_focus)
         set_immersive(act);

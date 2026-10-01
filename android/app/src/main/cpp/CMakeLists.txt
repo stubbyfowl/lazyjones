@@ -28,7 +28,9 @@ endif()
 add_library(lazyjones SHARED main.c audio.c ${RUNTIME} ${GAME})
 target_include_directories(lazyjones PRIVATE ${LJ_ROOT}/runtime ${LJ_ROOT}/frontend ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(lazyjones PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
-target_compile_options(lazyjones PRIVATE -O2 -Wall -Wextra -Wno-unused-parameter
+# -ffp-contract=off: no fused multiply-add, so the sound is bit-identical
+# to the host build that the tests check
+target_compile_options(lazyjones PRIVATE -O2 -ffp-contract=off -Wall -Wextra -Wno-unused-parameter
                        -fvisibility=hidden -ffunction-sections -fdata-sections)
 target_link_options(lazyjones PRIVATE -u ANativeActivity_onCreate -Wl,--gc-sections
                     -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1)

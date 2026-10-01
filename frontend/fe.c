@@ -428,6 +428,7 @@ int fe_frame(void)
     if (fe.menu_open) {
         lj_set_joystick(2, 0);
         lj_clear_keys();
+        fe.key_p = fe.key_m = 0; /* sent again after the menu if still held */
         /* auto repeat for up/down/left/right */
         uint32_t dirs = held & (FE_BTN_UP | FE_BTN_DOWN | FE_BTN_LEFT | FE_BTN_RIGHT);
         if (dirs && dirs == (uint32_t)fe.repeat_btn) {

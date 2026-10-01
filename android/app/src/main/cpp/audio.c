@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <aaudio/AAudio.h>
 #include <android/log.h>
 #include "audio.h"
 
@@ -16,10 +17,14 @@
 
 /* ---- ring buffer (one producer, one consumer) ------------------------- */
 
+/* Only the producer (game thread) writes ring_w and only the consumer
+ * (audio callback or AudioTrack thread) writes ring_r. To empty the buffer
+ * while a consumer can run, the producer asks the consumer to do it. */
 #define RING_SIZE 16384u /* power of two */
 #define RING_MASK (RING_SIZE - 1u)
 static int16_t ring[RING_SIZE];
 static atomic_uint ring_w, ring_r; /* free running indices */
+static atomic_uint flush_req, flush_done;
 
 void audio_write(const int16_t *s, size_t n)
 {
@@ -37,6 +42,11 @@ static size_t ring_read(int16_t *out, size_t n)
 {
     unsigned r = atomic_load_explicit(&ring_r, memory_order_relaxed);
     unsigned w = atomic_load_explicit(&ring_w, memory_order_acquire);
+    unsigned fr = atomic_load_explicit(&flush_req, memory_order_acquire);
+    if (fr != atomic_load_explicit(&flush_done, memory_order_relaxed)) {
+        r = w; /* drop everything written before the request */
+        atomic_store_explicit(&flush_done, fr, memory_order_relaxed);
+    }
     unsigned avail = w - r;
     if (n > avail)
         n = avail;
@@ -53,9 +63,17 @@ size_t audio_queued(void)
     return (size_t)(w - r);
 }
 
-static void ring_clear(void)
+/* only when no consumer runs (before start, after close) */
+static void ring_reset(void)
 {
     atomic_store(&ring_r, atomic_load(&ring_w));
+    atomic_store(&flush_done, atomic_load(&flush_req));
+}
+
+/* any time: the consumer drops the queued samples on its next read */
+static void ring_flush(void)
+{
+    atomic_fetch_add(&flush_req, 1u);
 }
 
 static atomic_int lost;
@@ -65,38 +83,29 @@ int audio_lost(void) { return atomic_load(&lost); }
 
 /* ---- AAudio (loaded at run time) ---------------------------------------- */
 
-typedef struct AAudioStreamBuilderStruct AAudioStreamBuilder;
-typedef struct AAudioStreamStruct AAudioStream;
-typedef int32_t aa_result;
-typedef int32_t (*aa_data_cb)(AAudioStream *, void *, void *, int32_t);
-typedef void (*aa_error_cb)(AAudioStream *, void *, aa_result);
-
-#define AA_FORMAT_PCM_I16 1
-#define AA_FORMAT_PCM_FLOAT 2
-#define AA_SHARING_SHARED 1
-#define AA_PERF_LOW_LATENCY 12
-#define AA_CALLBACK_CONTINUE 0
-
+/* The functions come from dlsym() so that the app also starts on Android
+ * 7 and 8 (no libaaudio.so there). Types and constants are from the NDK
+ * header. */
 static struct {
     void *lib;
-    aa_result (*create_builder)(AAudioStreamBuilder **);
-    void (*set_perf)(AAudioStreamBuilder *, int32_t);
-    void (*set_sharing)(AAudioStreamBuilder *, int32_t);
-    void (*set_format)(AAudioStreamBuilder *, int32_t);
+    aaudio_result_t (*create_builder)(AAudioStreamBuilder **);
+    void (*set_perf)(AAudioStreamBuilder *, aaudio_performance_mode_t);
+    void (*set_sharing)(AAudioStreamBuilder *, aaudio_sharing_mode_t);
+    void (*set_format)(AAudioStreamBuilder *, aaudio_format_t);
     void (*set_channels)(AAudioStreamBuilder *, int32_t);
-    void (*set_data_cb)(AAudioStreamBuilder *, aa_data_cb, void *);
-    void (*set_error_cb)(AAudioStreamBuilder *, aa_error_cb, void *);
-    aa_result (*open)(AAudioStreamBuilder *, AAudioStream **);
-    aa_result (*builder_delete)(AAudioStreamBuilder *);
-    aa_result (*start)(AAudioStream *);
-    aa_result (*pause)(AAudioStream *);
-    aa_result (*stop)(AAudioStream *);
-    aa_result (*close)(AAudioStream *);
+    void (*set_data_cb)(AAudioStreamBuilder *, AAudioStream_dataCallback, void *);
+    void (*set_error_cb)(AAudioStreamBuilder *, AAudioStream_errorCallback, void *);
+    aaudio_result_t (*open)(AAudioStreamBuilder *, AAudioStream **);
+    aaudio_result_t (*builder_delete)(AAudioStreamBuilder *);
+    aaudio_result_t (*start)(AAudioStream *);
+    aaudio_result_t (*pause)(AAudioStream *);
+    aaudio_result_t (*stop)(AAudioStream *);
+    aaudio_result_t (*close)(AAudioStream *);
     int32_t (*get_rate)(AAudioStream *);
     int32_t (*get_burst)(AAudioStream *);
-    aa_result (*set_buffer_size)(AAudioStream *, int32_t);
+    aaudio_result_t (*set_buffer_size)(AAudioStream *, int32_t);
     int32_t (*get_channels)(AAudioStream *);
-    int32_t (*get_format)(AAudioStream *);
+    aaudio_format_t (*get_format)(AAudioStream *);
 } aa;
 
 static AAudioStream *aa_stream;
@@ -105,7 +114,8 @@ static int aa_channels, aa_format;
 #define TMP_FRAMES 1024
 static int16_t tmp[TMP_FRAMES];
 
-static int32_t aa_callback(AAudioStream *s, void *user, void *data, int32_t frames)
+static aaudio_data_callback_result_t aa_callback(AAudioStream *s, void *user, void *data,
+                                                 int32_t frames)
 {
     (void)s;
     (void)user;
@@ -117,7 +127,7 @@ static int32_t aa_callback(AAudioStream *s, void *user, void *data, int32_t fram
         size_t got = atomic_load(&paused) ? 0 : ring_read(tmp, (size_t)n);
         for (int i = (int)got; i < n; i++)
             tmp[i] = 0;
-        if (aa_format == AA_FORMAT_PCM_FLOAT) {
+        if (aa_format == AAUDIO_FORMAT_PCM_FLOAT) {
             float *out = (float *)data + (size_t)done * (size_t)aa_channels;
             for (int i = 0; i < n; i++) {
                 float v = (float)tmp[i] * (1.0f / 32768.0f);
@@ -132,10 +142,10 @@ static int32_t aa_callback(AAudioStream *s, void *user, void *data, int32_t fram
         }
         done += n;
     }
-    return AA_CALLBACK_CONTINUE;
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
-static void aa_error(AAudioStream *s, void *user, aa_result err)
+static void aa_error(AAudioStream *s, void *user, aaudio_result_t err)
 {
     (void)s;
     (void)user;
@@ -179,18 +189,18 @@ static int aa_open(void)
     if (!aa_load())
         return 0;
     AAudioStreamBuilder *b = NULL;
-    if (aa.create_builder(&b) != 0 || !b)
+    if (aa.create_builder(&b) != AAUDIO_OK || !b)
         return 0;
-    aa.set_perf(b, AA_PERF_LOW_LATENCY);
-    aa.set_sharing(b, AA_SHARING_SHARED);
-    aa.set_format(b, AA_FORMAT_PCM_I16);
+    aa.set_perf(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+    aa.set_sharing(b, AAUDIO_SHARING_MODE_SHARED);
+    aa.set_format(b, AAUDIO_FORMAT_PCM_I16);
     aa.set_channels(b, 1);
     aa.set_data_cb(b, aa_callback, NULL);
     aa.set_error_cb(b, aa_error, NULL);
     AAudioStream *s = NULL;
-    aa_result r = aa.open(b, &s);
+    aaudio_result_t r = aa.open(b, &s);
     aa.builder_delete(b);
-    if (r != 0 || !s) {
+    if (r != AAUDIO_OK || !s) {
         LOGW("AAudio open failed: %d", (int)r);
         return 0;
     }
@@ -198,7 +208,7 @@ static int aa_open(void)
     aa_format = aa.get_format(s);
     int rate = aa.get_rate(s);
     if (aa_channels < 1 || aa_channels > 8 || rate < 8000 ||
-        (aa_format != AA_FORMAT_PCM_I16 && aa_format != AA_FORMAT_PCM_FLOAT)) {
+        (aa_format != AAUDIO_FORMAT_PCM_I16 && aa_format != AAUDIO_FORMAT_PCM_FLOAT)) {
         aa.close(s);
         return 0;
     }
@@ -206,7 +216,7 @@ static int aa_open(void)
     if (burst > 0)
         aa.set_buffer_size(s, burst * 2);
     aa_stream = s;
-    if (aa.start(s) != 0) {
+    if (aa.start(s) != AAUDIO_OK) {
         aa.close(s);
         aa_stream = NULL;
         return 0;
@@ -354,7 +364,7 @@ int audio_open(JavaVM *vm, int sdk)
 {
     atomic_store(&lost, 0);
     atomic_store(&paused, 0);
-    ring_clear();
+    ring_reset();
     int rate = 0;
     if (sdk >= 28) {
         rate = aa_open();
@@ -386,7 +396,7 @@ void audio_close(void)
         pthread_join(at_thread, NULL);
     }
     mode = 0;
-    ring_clear();
+    ring_reset();
 }
 
 void audio_pause(void)
@@ -398,7 +408,7 @@ void audio_pause(void)
 
 void audio_resume(void)
 {
-    ring_clear();
+    ring_flush();
     atomic_store(&paused, 0);
     if (mode == 1 && aa_stream)
         aa.start(aa_stream);

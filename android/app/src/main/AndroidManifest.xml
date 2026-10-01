@@ -5,6 +5,8 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.hardware.gamepad" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
+    <!-- landscape is used, but some handhelds have a portrait panel -->
+    <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />
 
     <application
         android:allowBackup="true"
@@ -21,7 +23,7 @@
         <activity
             android:name="android.app.NativeActivity"
             android:alwaysRetainTaskState="true"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|touchscreen|uiMode|density|fontScale|locale|layoutDirection"
             android:exported="true"
             android:launchMode="singleTask"
             android:screenOrientation="sensorLandscape">
