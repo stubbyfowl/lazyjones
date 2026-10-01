@@ -39,13 +39,21 @@ jobs:
       - name: Python files compile
         run: python3 -m py_compile tools/ljrecomp/*.py tools/gen_cpu_ops.py tools/apkbuild/mksysroot.py tests/ss_convert.py
 
+      - name: Install Mesa (for the drawing test)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri
+
       - name: Build (no warnings allowed)
         run: |
-          make -C host all tests 2>&1 | tee build.log
+          make -C host all tests gltest 2>&1 | tee build.log
           if grep -q "warning:" build.log; then echo "compiler warnings"; exit 1; fi
 
       - name: Front end test (app without the game)
         run: host/fetest_nogame "$RUNNER_TEMP/fe"
+
+      - name: Drawing test (OpenGL ES 2 with Mesa)
+        run: host/gltest
 
       - name: 6502 functional test (Klaus Dormann)
         run: |

@@ -42,3 +42,4 @@ __pycache__/
 # test binaries
 host/fetest
 host/fetest_nogame
+host/gltest

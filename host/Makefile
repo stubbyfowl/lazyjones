@@ -20,7 +20,7 @@ ljexplore: ljexplore.c $(RT_SRC) $(RT)/trace.c $(RT)/recomp_stub.c $(wildcard $(
 	$(CC) $(CFLAGS) -DLJ_TRACE -o $@ ljexplore.c $(RT_SRC) $(RT)/trace.c $(RT)/recomp_stub.c -lm
 
 clean:
-	rm -f ljrun_interp ljrun_game ljexplore fetest fetest_nogame ../tests/cpu_klaus ../tests/cpu_ss
+	rm -f ljrun_interp ljrun_game ljexplore gltest fetest fetest_nogame ../tests/cpu_klaus ../tests/cpu_ss
 
 # front end tests (tests/fe_test.c)
 FE_TEST_DEPS = ../tests/fe_test.c ../frontend/fe.c $(RT_SRC) $(wildcard $(RT)/*.h) ../frontend/fe.h
@@ -38,3 +38,8 @@ fetest_nogame: $(FE_TEST_DEPS) $(RT)/recomp_stub.c $(RT)/nogame.c
 	$(CC) $(CFLAGS) -o $@ ../tests/cpu_ss.c $(RT_SRC) $(RT)/trace.c $(RT)/recomp_stub.c -lm
 
 tests: ../tests/cpu_klaus ../tests/cpu_ss fetest_nogame
+
+# drawing test with Mesa (needs libegl-dev, libgles-dev, libegl-mesa0, libgl1-mesa-dri)
+APP = ../android/app/src/main/cpp
+gltest: gltest.c $(APP)/glview.c $(APP)/glview.h ../frontend/fe.h
+	$(CC) $(CFLAGS) -I$(APP) -I../frontend -o $@ gltest.c $(APP)/glview.c -lEGL -lGLESv2 -lm
