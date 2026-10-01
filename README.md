@@ -35,8 +35,9 @@ handhelds, with gamepad support.
 
 ### Enhancements
 
-Like other recompiled ports (for example Ship of Harkinian), this port adds
-features that the original game does not have:
+Like modern ports of classic games (for example Ship of Harkinian, which is
+based on a decompilation), this port adds features that the original game
+does not have:
 
 | Feature | What it does |
 |---|---|
