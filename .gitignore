@@ -34,8 +34,11 @@ android/.idea/
 *.aab
 *.keystore
 *.jks
-!android/debug-placeholder.txt
 
 # Python
 __pycache__/
 *.pyc
+
+# test binaries
+host/fetest
+host/fetest_nogame
