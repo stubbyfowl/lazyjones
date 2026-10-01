@@ -85,11 +85,17 @@ uint32_t lj_frame_count(void);
 int lj_game_init(int sample_rate);
 const char *lj_game_version(void);
 
-/* High score table persistence (see lj_game.c). The front end saves and
- * restores this block; it is small and safe to write at any time. */
-size_t lj_hiscore_size(void);
-void lj_hiscore_get(uint8_t *out);
-void lj_hiscore_set(const uint8_t *in);
+/* Enhancements (lj_extras.c). They work only when the loaded game code is
+ * the known code (lj_extras_available() == 1); otherwise they do nothing. */
+int lj_extras_available(void);
+void lj_cheat_infinite_lives(int on); /* call before each lj_run_frame */
+uint32_t lj_score(void);              /* current score */
+uint32_t lj_hiscore(void);            /* high score in the game's memory */
+void lj_set_hiscore(uint32_t v);      /* 0..999999 */
+int lj_lives(void);                   /* lives left, -1 when not available */
+/* RAM access that keeps the recompiled code correct when code is changed */
+void lj_poke(uint16_t addr, uint8_t v);
+uint8_t lj_peek(uint16_t addr);
 
 /* palette: 16 colours as 0xRRGGBB */
 extern const uint32_t lj_palette[16];

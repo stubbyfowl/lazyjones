@@ -230,6 +230,7 @@ uint8_t sid_read(uint8_t reg, uint64_t t);
 void sid_write(uint8_t reg, uint8_t val, uint64_t t);
 void sid_sync(uint64_t t);
 void sid_post_load(void);
+void lj_extras_check(void);   /* lj_extras.c: after the game image is loaded */
 size_t sid_audio_read(int16_t *out, size_t max);
 size_t sid_audio_available(void);
 

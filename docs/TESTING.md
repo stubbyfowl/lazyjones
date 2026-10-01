@@ -94,7 +94,7 @@ sudo apt-get install qemu-user-static libc6-dev-arm64-cross libgcc-13-dev-arm64-
 RT=runtime
 clang --target=aarch64-linux-gnu -fuse-ld=lld -static -O2 -ffp-contract=off -std=c11 -I$RT \
     -o /tmp/ljrun_arm64 host/ljrun.c $RT/mem.c $RT/cpu_interp.c $RT/vic.c $RT/cia.c $RT/sid.c \
-    $RT/kernal.c $RT/basic_rnd.c $RT/machine.c $RT/palette.c $RT/trace.c $RT/lj_game.c \
+    $RT/kernal.c $RT/basic_rnd.c $RT/machine.c $RT/palette.c $RT/lj_extras.c $RT/trace.c $RT/lj_game.c \
     build/gen/lj_recomp.c build/gen/lj_game_data.c -lm
 host/ljrun_game --game --frames 12000 --script /tmp/script.txt --hash --wav /tmp/x86.wav > /tmp/x86.txt
 qemu-aarch64-static /tmp/ljrun_arm64 --game --frames 12000 --script /tmp/script.txt --hash --wav /tmp/arm.wav > /tmp/arm.txt

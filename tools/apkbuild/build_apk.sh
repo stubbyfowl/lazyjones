@@ -63,7 +63,7 @@ CPP=$ROOT/android/app/src/main/cpp
 RT=$ROOT/runtime
 SRC="$CPP/main.c $CPP/audio.c $RT/mem.c $RT/cpu_interp.c $RT/vic.c $RT/cia.c
      $RT/sid.c $RT/kernal.c $RT/basic_rnd.c $RT/machine.c $RT/palette.c
-     $ROOT/frontend/fe.c"
+     $RT/lj_extras.c $ROOT/frontend/fe.c"
 if [ -n "$GEN" ]; then
     if [ ! -f "$GEN/lj_recomp.c" ] || [ ! -f "$GEN/lj_game_data.c" ]; then
         echo "no recompiled game in $GEN" >&2

@@ -3,7 +3,8 @@ CC ?= cc
 CFLAGS ?= -O2 -g -std=c11 -ffp-contract=off -Wall -Wextra -Wno-unused-parameter
 RT = ../runtime
 RT_SRC = $(RT)/mem.c $(RT)/cpu_interp.c $(RT)/vic.c $(RT)/cia.c $(RT)/sid.c \
-         $(RT)/kernal.c $(RT)/basic_rnd.c $(RT)/machine.c $(RT)/palette.c
+         $(RT)/kernal.c $(RT)/basic_rnd.c $(RT)/machine.c $(RT)/palette.c \
+         $(RT)/lj_extras.c
 GEN ?= ../build/gen
 
 all: ljrun_interp ljexplore

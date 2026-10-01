@@ -29,6 +29,7 @@ int lj_game_init(int sample_rate)
     C.ram[0xAF] = (uint8_t)(end >> 8);
     C.ram[0x2D] = C.ram[0x2F] = C.ram[0x31] = (uint8_t)end;
     C.ram[0x2E] = C.ram[0x30] = C.ram[0x32] = (uint8_t)(end >> 8);
+    lj_extras_check();
     if (recomp_available && lj_recomp_enabled) {
         for (uint32_t i = 0; i < lj_code_count; i++) {
             uint16_t a = lj_code_addr[i];

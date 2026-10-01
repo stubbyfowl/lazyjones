@@ -15,6 +15,7 @@ set(RUNTIME
     ${LJ_ROOT}/runtime/basic_rnd.c
     ${LJ_ROOT}/runtime/machine.c
     ${LJ_ROOT}/runtime/palette.c
+    ${LJ_ROOT}/runtime/lj_extras.c
     ${LJ_ROOT}/frontend/fe.c)
 
 if(LJ_GEN_DIR)
