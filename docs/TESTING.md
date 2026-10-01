@@ -10,7 +10,7 @@ itself. The tests with the game run on your computer with your copy.
 Build the host programs and tests (Linux or macOS, any C11 compiler):
 
 ```sh
-make -C host all tests
+make -C host all tests gltest
 ```
 
 | Command | What it checks |
@@ -18,6 +18,7 @@ make -C host all tests
 | `tests/cpu_klaus 6502_functional_test.bin` | Klaus Dormann's 6502 functional test: all documented instructions and flags, decimal mode. Ends with `PASS`. |
 | `tests/cpu_ss DIR` | SingleStepTests 6502 vectors: registers, memory and cycle count for each instruction. Convert the JSON files first: `python3 tests/ss_convert.py JSON_DIR DIR`. The 12 JAM opcodes are not compared (the CPU halts there). |
 | `host/fetest_nogame DIR` | Front end without the game: message screen, Back quits. |
+| `host/gltest` | The picture drawing of the app (`android/app/src/main/cpp/glview.c`) with Mesa, without a window: the shaders compile; nearest and sharp give exact pixel blocks at integer scales; at other scales sharp pixels are exact inside a texel and only blend at texel edges; scanlines; PAL aspect; black bars; border crop. Needs `libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri`; build with `make -C host gltest`. |
 | `python3 tools/gen_cpu_ops.py \| cmp - runtime/cpu_ops_gen.h` | The instruction macros are up to date with the opcode table. |
 
 Where to get the test data (CI uses these fixed versions):
@@ -32,6 +33,7 @@ Where to get the test data (CI uses these fixed versions):
 CI (`.github/workflows/build.yml`) also:
 
 - runs the host tests on x86-64 and on arm64 (native arm64 runner),
+  including the drawing test with Mesa,
 - builds the Android app with Gradle and the NDK and checks the APK
   (signature, alignment, 16 KB aligned segments of the native library),
 - builds the app with `tools/apkbuild` (no NDK) and checks that the native
@@ -55,10 +57,21 @@ make -C host ljrun_game fetest
 host/fetest /tmp/fetest
 ```
 
-79 checks: menu, save state and load state (the machine state after a
-load is exactly the saved state), refused state files from another build,
-reset, settings saved to a file, volume, B button, touch, stick, autosave
-and resume, quit, and that the same input gives the same result.
+142 checks: menu pages, save state and load state in 4 slots (the machine
+state after a load is exactly the saved state), refused state files from
+another build, reset, settings saved to a file, old settings files, button
+mapping (every action), quick save and quick load, auto fire pattern, fast
+forward (2x to 4x, one frame of sound per frame), infinite lives (no life is
+lost, the patched code is restored when the cheat is off), the saved high
+score (saved at game over, shown as HI in the next session, not saved for a
+game with infinite lives, never saved when only half copied, cleared from
+the menu), volume, touch, stick, autosave and resume, quit, and that the
+same input gives the same result.
+
+The tests were checked by breaking each feature on purpose (no high score
+restore, no high score save, cheat ignored, cheat scores counted, no wait
+for a stable high score, wrong auto fire, no fast forward, mapping
+ignored): each break makes checks fail.
 
 ### Recompiled code against the interpreter
 
@@ -119,7 +132,8 @@ writes a picture (PPM) every 100 frames and the sound as a WAV file.
 |---|---|
 | Klaus Dormann functional test | pass |
 | SingleStepTests, 244 opcodes, 2,440,000 tests | pass |
-| Front end (game build and no-game build) | 84 of 84 checks pass, game part also as arm64 code |
+| Front end (game build and no-game build) | 148 of 148 checks pass, game part also as arm64 code |
+| Drawing with Mesa | 34 of 34 checks pass |
 | Recompiled against interpreter, 12,000 frames of random play | same state in every frame |
 | arm64 (qemu) against x86-64, 12,000 frames | same state in every frame, same sound |
 | DKS, Section 8 and CMM releases | build and run |

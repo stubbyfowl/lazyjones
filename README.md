@@ -24,28 +24,55 @@ handhelds, with gamepad support.
   instruction code, so both paths give the same result.
 - Exact PAL timing: 50.125 frames per second, cycle-exact 6510 CPU, VIC-II
   bad lines and sprite timing, SID sound with the 6581 filter.
-- Controllers: D-pad, analog stick, face and shoulder buttons. Also a
-  keyboard and the touch screen.
-- Menu: save state, load state, reset, screen size, filter, border size,
-  sound and volume, B button function. The game is saved when you leave
-  the app and continues when you come back.
-- Picture: sharp pixels at any screen size ("sharp bilinear"), correct PAL
-  pixel aspect, or integer scaling, or full screen stretch.
+- Controllers: D-pad, analog stick, face and shoulder buttons, analog L2
+  and R2 triggers. Also a keyboard and the touch screen. Very short taps
+  are never lost.
+- Picture: sharp pixels at any screen size ("sharp bilinear"), CRT
+  scanlines, nearest or smooth; correct PAL pixel aspect, integer scaling
+  or full screen stretch; full, small or no border.
 - Asks for a 50 Hz display mode where the device has one (Android 11+),
   for smooth scrolling.
 
+### Enhancements
+
+Like other recompiled ports (for example Ship of Harkinian), this port adds
+features that the original game does not have:
+
+| Feature | What it does |
+|---|---|
+| Button mapping | Each gamepad button can be fire, pause, music on/off, menu, fast forward, quick save, quick load or nothing. |
+| Save states | 4 slots. Quick save and quick load can go on a button. |
+| Autosave | The game is saved when you leave the app and continues when you come back (can be turned off). |
+| Saved high score | The original game forgets the high score at power off. This port keeps it and shows it as HI in the next session. |
+| Infinite lives | Optional cheat. Scores from a game with this cheat are not saved as the high score. |
+| Fast forward | Hold L1 or L2: 2, 3 or 4 times speed. |
+| Auto fire | Optional: fire repeats 8 times per second while held. |
+| Scanlines | A CRT-like picture filter. |
+
+The game hooks (lives, score, high score) work only when the build finds the
+known game code. For another copy of the game they are turned off and the
+menu shows "NOT AVAILABLE".
+
 ## Controls
+
+Default controls (change them in MENU > CONTROLS):
 
 | Gamepad | Keyboard | Function |
 |---|---|---|
 | D-pad or left stick | Arrow keys, W A S D | Joystick (C64 port 2) |
-| A, X, Y (and B, see menu) | Space, Enter, Ctrl | Fire |
+| A, B, X, Y | Space, Enter, Ctrl (A) | Fire |
 | START | P | Pause the game (C64 key P) |
-| R1 or R2 | M | Music on or off (C64 key M) |
-| SELECT, Back, Menu, Guide | Esc | Open or close the menu |
+| R1 or R2 | M (R1) | Music on or off (C64 key M) |
+| L1 or L2 (hold) | Tab (L1) | Fast forward |
+| SELECT | | Open the menu |
+| Back, Menu, Guide | Esc | Always open the menu (cannot be changed) |
+
+The keyboard keys act like the gamepad buttons in brackets, so they follow
+your mapping.
 
 In the menu: up and down select a line, A does the action, left and right
-change a setting, B or SELECT closes the menu.
+change a setting, B goes back. The menu has the pages VIDEO, SOUND,
+CONTROLS and ENHANCEMENTS.
 
 Touch screen: the left half of the screen is a joystick (put your finger
 down and move it), the right half is fire. Tap the top right corner to
@@ -123,7 +150,7 @@ copy.
 your .d64/.prg --> tools/ljrecomp --> build/gen/lj_recomp.c    (game code as C)
                                       build/gen/lj_game_data.c (game memory image)
 runtime/   C64 hardware in C: CPU, VIC-II, SID, CIA, memory, KERNAL
-frontend/  menu, settings, save states, input mapping (portable C)
+frontend/  menu, settings, save states, button mapping, enhancements (portable C)
 android/   NativeActivity: OpenGL ES 2 video, AAudio/AudioTrack sound, input
 ```
 
@@ -146,6 +173,24 @@ android/   NativeActivity: OpenGL ES 2 video, AAudio/AudioTrack sound, input
 5. **KERNAL.** The C64 ROMs are not used. The runtime has its own small
    KERNAL and the BASIC random number routine, written to give the same
    results as the original ROM code.
+6. **Game hooks.** `runtime/lj_extras.c` knows where the game keeps its
+   score (`$0360`), high score (`$0363`) and lives (`$0366`), and the one
+   instruction that takes a life (`$0FDF`). Infinite lives changes that
+   `DEC` into an `LDA` of the same length; the runtime then runs it in the
+   interpreter. The high score is read only when it is the same in two
+   frames in a row, and written back only while the score is 0, so the
+   game's own copy routine can never be interrupted halfway.
+
+### Recompilation and decompilation
+
+Ports like Ship of Harkinian start from a decompilation: people rewrote the
+whole game as readable C by hand. This port uses static recompilation
+instead: a tool translates every machine instruction into C
+automatically. The result also runs as native code and has the same hooks
+for enhancements, but the generated C reads like the machine code, not like
+hand-written source. `python3 tools/ljrecomp disasm` writes a commented
+disassembly of your copy, as a start for study. Do not publish it: it
+contains the game.
 
 ## Tests
 
@@ -155,7 +200,8 @@ android/   NativeActivity: OpenGL ES 2 video, AAudio/AudioTrack sound, input
 | SingleStepTests 6502 (all 244 opcodes that do not halt the CPU, 2,440,000 tests: registers, memory, cycle count) | pass |
 | Recompiled code against the interpreter, 12,000 frames of random play | same state every frame |
 | arm64 build (qemu) against the x86-64 build, 12,000 frames | same state and same sound, bit for bit |
-| Front end: menu, save and load, settings, autosave, input, volume | 84 checks pass (the game part also as arm64 code) |
+| Front end: menus, save slots, settings, button mapping, auto fire, fast forward, infinite lives, saved high score, autosave, touch, volume | 148 checks pass (the game part also as arm64 code); each feature check was proven by breaking the feature on purpose |
+| Drawing: shaders compile, exact pixels for nearest and sharp, sharp blends only at pixel edges, scanlines, aspect, borders (Mesa, no window) | 34 checks pass |
 | CI: Gradle and NDK build, build without NDK, start test on the Android emulator | see `.github/workflows/build.yml` |
 
 See [docs/TESTING.md](docs/TESTING.md) for the details and for how to run
