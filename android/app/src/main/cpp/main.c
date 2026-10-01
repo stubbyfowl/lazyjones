@@ -31,6 +31,7 @@
 
 #include "audio.h"
 #include "fe.h"
+#include "glview.h"
 #include "lj.h"
 
 #define TAG "LazyJones"
@@ -64,6 +65,7 @@ typedef struct {
     uint32_t latched; /* keys pressed since the last snapshot (short taps) */
     int fire_touched; /* the fire half was touched since the last snapshot */
     float ax, ay, hx, hy;
+    uint32_t trig;    /* L2/R2 from analog trigger axes */
     touch_t touch[MAX_POINTERS];
     int taps;
     float tap_x[8], tap_y[8];
@@ -85,121 +87,16 @@ static double now_sec(void)
     return (double)ts.tv_sec + (double)ts.tv_nsec * 1e-9;
 }
 
-/* ---- EGL / GL -------------------------------------------------------------- */
+/* ---- EGL ------------------------------------------------------------------- */
 
 typedef struct {
     EGLDisplay display;
     EGLConfig config;
     EGLContext context;
     EGLSurface surface;
-    int gl_ready;
-    GLuint prog_sharp, prog_plain, tex;
-    GLint sharp_tex, sharp_size, sharp_scale, plain_tex;
-    int w, h;
-} gfx_t;
+} egl_t;
 
-static gfx_t gx = {EGL_NO_DISPLAY, 0, EGL_NO_CONTEXT, EGL_NO_SURFACE, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-
-static const char *vs_src =
-    "attribute vec2 a_pos;\n"
-    "attribute vec2 a_uv;\n"
-    "varying vec2 v_uv;\n"
-    "void main() { v_uv = a_uv; gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
-
-/* "sharp bilinear": nearest neighbour inside a texel, linear blend only on
- * the one output pixel that straddles a texel edge */
-static const char *fs_sharp_src =
-    "#ifdef GL_FRAGMENT_PRECISION_HIGH\n"
-    "precision highp float;\n"
-    "#else\n"
-    "precision mediump float;\n"
-    "#endif\n"
-    "uniform sampler2D u_tex;\n"
-    "uniform vec2 u_size;\n"
-    "uniform vec2 u_scale;\n"
-    "varying vec2 v_uv;\n"
-    "void main() {\n"
-    "  vec2 t = v_uv * u_size;\n"
-    "  vec2 c = fract(t) - 0.5;\n"
-    "  vec2 r = 0.5 - 0.5 / u_scale;\n"
-    "  vec2 s = (c - clamp(c, -r, r)) * u_scale + 0.5;\n"
-    "  gl_FragColor = texture2D(u_tex, (floor(t) + s) / u_size);\n"
-    "}\n";
-
-static const char *fs_plain_src =
-    "precision mediump float;\n"
-    "uniform sampler2D u_tex;\n"
-    "varying vec2 v_uv;\n"
-    "void main() { gl_FragColor = texture2D(u_tex, v_uv); }\n";
-
-static GLuint compile(GLenum type, const char *src)
-{
-    GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, NULL);
-    glCompileShader(s);
-    GLint ok = 0;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char log[512];
-        glGetShaderInfoLog(s, sizeof log, NULL, log);
-        LOGE("shader: %s", log);
-        glDeleteShader(s);
-        return 0;
-    }
-    return s;
-}
-
-static GLuint link_program(const char *fs)
-{
-    GLuint v = compile(GL_VERTEX_SHADER, vs_src);
-    GLuint f = compile(GL_FRAGMENT_SHADER, fs);
-    if (!v || !f) {
-        if (v) glDeleteShader(v);
-        if (f) glDeleteShader(f);
-        return 0;
-    }
-    GLuint p = glCreateProgram();
-    glAttachShader(p, v);
-    glAttachShader(p, f);
-    glBindAttribLocation(p, 0, "a_pos");
-    glBindAttribLocation(p, 1, "a_uv");
-    glLinkProgram(p);
-    glDeleteShader(v);
-    glDeleteShader(f);
-    GLint ok = 0;
-    glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        glDeleteProgram(p);
-        return 0;
-    }
-    return p;
-}
-
-static int gl_init_resources(void)
-{
-    gx.prog_plain = link_program(fs_plain_src);
-    if (!gx.prog_plain)
-        return 0;
-    gx.prog_sharp = link_program(fs_sharp_src); /* optional */
-    gx.plain_tex = glGetUniformLocation(gx.prog_plain, "u_tex");
-    if (gx.prog_sharp) {
-        gx.sharp_tex = glGetUniformLocation(gx.prog_sharp, "u_tex");
-        gx.sharp_size = glGetUniformLocation(gx.prog_sharp, "u_size");
-        gx.sharp_scale = glGetUniformLocation(gx.prog_sharp, "u_scale");
-    }
-    glGenTextures(1, &gx.tex);
-    glBindTexture(GL_TEXTURE_2D, gx.tex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, FE_W, FE_H, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_BLEND);
-    gx.gl_ready = 1;
-    return 1;
-}
+static egl_t gx = {EGL_NO_DISPLAY, 0, EGL_NO_CONTEXT, EGL_NO_SURFACE};
 
 static void egl_destroy_surface(void)
 {
@@ -217,8 +114,7 @@ static void egl_terminate(void)
     if (gx.display != EGL_NO_DISPLAY) {
         if (gx.context != EGL_NO_CONTEXT) {
             /* GL objects die with the context */
-            gx.prog_plain = gx.prog_sharp = gx.tex = 0;
-            gx.gl_ready = 0;
+            glview_forget();
             eglDestroyContext(gx.display, gx.context);
         }
         eglTerminate(gx.display);
@@ -279,7 +175,7 @@ static int egl_attach(ANativeWindow *win)
         return 0;
     }
     eglSwapInterval(gx.display, 1);
-    if (!gx.gl_ready && !gl_init_resources()) {
+    if (!glview_ready() && !glview_init()) {
         LOGE("GL setup failed");
         egl_destroy_surface();
         return 0;
@@ -289,41 +185,6 @@ static int egl_attach(ANativeWindow *win)
     if (sfr)
         sfr(win, (float)LJ_FRAME_HZ, 1 /* FIXED_SOURCE */);
     return 1;
-}
-
-static void compute_dest(int ww, int wh, int sw, int sh, const fe_settings_t *s,
-                         float *x, float *y, float *w, float *h)
-{
-    float dw, dh;
-    if (s->scale == FE_SCALE_STRETCH) {
-        dw = (float)ww;
-        dh = (float)wh;
-    } else if (s->scale == FE_SCALE_INTEGER) {
-        int k = ww / sw < wh / sh ? ww / sw : wh / sh;
-        if (k < 1)
-            k = 1;
-        dw = (float)(sw * k);
-        dh = (float)(sh * k);
-        if (dw > (float)ww || dh > (float)wh) {
-            /* too small a screen for integer scaling: fit instead */
-            float aspect = (float)sw / (float)sh;
-            if ((float)ww / (float)wh > aspect) { dh = (float)wh; dw = dh * aspect; }
-            else { dw = (float)ww; dh = dw / aspect; }
-        }
-    } else {
-        float aspect = (float)sw * FE_PAR / (float)sh;
-        if ((float)ww / (float)wh > aspect) {
-            dh = (float)wh;
-            dw = floorf(dh * aspect + 0.5f);
-        } else {
-            dw = (float)ww;
-            dh = floorf(dw / aspect + 0.5f);
-        }
-    }
-    *w = dw;
-    *h = dh;
-    *x = floorf(((float)ww - dw) * 0.5f);
-    *y = floorf(((float)wh - dh) * 0.5f);
 }
 
 static void render(void)
@@ -337,7 +198,7 @@ static void render(void)
     int sx, sy, sw, sh;
     fe_view(&sx, &sy, &sw, &sh);
     float dx, dy, dw, dh;
-    compute_dest(ww, wh, sw, sh, s, &dx, &dy, &dw, &dh);
+    glview_dest(ww, wh, sw, sh, s, &dx, &dy, &dw, &dh);
 
     pthread_mutex_lock(&g_app.mu);
     g_app.dst_x = dx; g_app.dst_y = dy; g_app.dst_w = dw; g_app.dst_h = dh;
@@ -345,44 +206,7 @@ static void render(void)
     g_app.win_w = ww; g_app.win_h = wh;
     pthread_mutex_unlock(&g_app.mu);
 
-    glViewport(0, 0, ww, wh);
-    glClearColor(0, 0, 0, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
-
-    glBindTexture(GL_TEXTURE_2D, gx.tex);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, FE_W, FE_H, GL_RGBA, GL_UNSIGNED_BYTE, fe_rgba());
-    int sharp = s->filter == FE_FILTER_SHARP && gx.prog_sharp;
-    GLint filt = s->filter == FE_FILTER_NEAREST ? GL_NEAREST : GL_LINEAR;
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filt);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filt);
-
-    float x0 = dx / (float)ww * 2.0f - 1.0f, x1 = (dx + dw) / (float)ww * 2.0f - 1.0f;
-    float y0 = 1.0f - dy / (float)wh * 2.0f, y1 = 1.0f - (dy + dh) / (float)wh * 2.0f;
-    float u0 = (float)sx / FE_W, u1 = (float)(sx + sw) / FE_W;
-    float v0 = (float)sy / FE_H, v1 = (float)(sy + sh) / FE_H;
-    const GLfloat verts[] = {
-        x0, y0, u0, v0,
-        x1, y0, u1, v0,
-        x0, y1, u0, v1,
-        x1, y1, u1, v1,
-    };
-    if (sharp) {
-        glUseProgram(gx.prog_sharp);
-        glUniform1i(gx.sharp_tex, 0);
-        glUniform2f(gx.sharp_size, (float)FE_W, (float)FE_H);
-        float scx = dw / (float)sw, scy = dh / (float)sh;
-        glUniform2f(gx.sharp_scale, scx < 1.0f ? 1.0f : scx, scy < 1.0f ? 1.0f : scy);
-    } else {
-        glUseProgram(gx.prog_plain);
-        glUniform1i(gx.plain_tex, 0);
-    }
-    glActiveTexture(GL_TEXTURE0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), verts + 2);
-    glEnableVertexAttribArray(0);
-    glEnableVertexAttribArray(1);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    glview_draw(ww, wh, fe_rgba(), sx, sy, sw, sh, s, dx, dy, dw, dh);
 }
 
 /* ---- game thread ------------------------------------------------------------- */
@@ -449,7 +273,7 @@ static void *game_main(void *arg)
         a->latched = 0;
         pending_touch_fire |= a->fire_touched;
         a->fire_touched = 0;
-        in.held = a->keys | pending;
+        in.held = a->keys | pending | a->trig;
         in.ax = a->ax;
         in.ay = a->ay;
         if (a->hx < -0.5f) in.held |= FE_BTN_LEFT;
@@ -460,14 +284,14 @@ static void *game_main(void *arg)
         if (menu)
             pending_touch_fire = 0; /* touches are menu taps there */
         else if (pending_touch_fire)
-            in.held |= FE_BTN_FIRE;
+            in.held |= FE_BTN_TOUCH_FIRE;
         if (!menu) {
             for (int i = 0; i < MAX_POINTERS; i++) {
                 touch_t *t = &a->touch[i];
                 if (!t->active)
                     continue;
                 if (t->role == 2)
-                    in.held |= FE_BTN_FIRE;
+                    in.held |= FE_BTN_TOUCH_FIRE;
                 if (t->role == 1) {
                     float k = (float)(a->win_h > 0 ? a->win_h : 1000) * 0.06f;
                     float jx = (t->x - t->x0) / k, jy = (t->y - t->y0) / k;
@@ -607,6 +431,8 @@ static void *game_main(void *arg)
 
 /* ---- input ----------------------------------------------------------------- */
 
+/* Android key -> physical button of the front end. Keyboards act like a
+ * gamepad: their keys follow the button mapping of the CONTROLS menu. */
 static uint32_t key_button(int32_t code)
 {
     switch (code) {
@@ -614,20 +440,21 @@ static uint32_t key_button(int32_t code)
     case AKEYCODE_DPAD_DOWN: case AKEYCODE_S: return FE_BTN_DOWN;
     case AKEYCODE_DPAD_LEFT: case AKEYCODE_A: return FE_BTN_LEFT;
     case AKEYCODE_DPAD_RIGHT: case AKEYCODE_D: return FE_BTN_RIGHT;
-    case AKEYCODE_DPAD_CENTER: case AKEYCODE_BUTTON_A: case AKEYCODE_ENTER:
+    case AKEYCODE_BUTTON_A: case AKEYCODE_DPAD_CENTER: case AKEYCODE_ENTER:
     case AKEYCODE_NUMPAD_ENTER: case AKEYCODE_SPACE: case AKEYCODE_CTRL_LEFT:
     case AKEYCODE_CTRL_RIGHT: case AKEYCODE_BUTTON_1:
-        return FE_BTN_FIRE;
-    case AKEYCODE_BUTTON_B: case AKEYCODE_BUTTON_2: return FE_BTN_FIRE2;
-    case AKEYCODE_BUTTON_X: case AKEYCODE_BUTTON_Y: case AKEYCODE_BUTTON_C:
-    case AKEYCODE_BUTTON_Z: case AKEYCODE_BUTTON_3: case AKEYCODE_BUTTON_4:
-        return FE_BTN_FIRE3;
+        return FE_BTN_A;
+    case AKEYCODE_BUTTON_B: case AKEYCODE_BUTTON_2: return FE_BTN_B;
+    case AKEYCODE_BUTTON_X: case AKEYCODE_BUTTON_C: case AKEYCODE_BUTTON_3: return FE_BTN_X;
+    case AKEYCODE_BUTTON_Y: case AKEYCODE_BUTTON_Z: case AKEYCODE_BUTTON_4: return FE_BTN_Y;
+    case AKEYCODE_BUTTON_L1: case AKEYCODE_TAB: return FE_BTN_L1;
+    case AKEYCODE_BUTTON_R1: case AKEYCODE_M: return FE_BTN_R1;
+    case AKEYCODE_BUTTON_L2: return FE_BTN_L2;
+    case AKEYCODE_BUTTON_R2: return FE_BTN_R2;
     case AKEYCODE_BUTTON_START: case AKEYCODE_P: return FE_BTN_START;
     case AKEYCODE_BUTTON_SELECT: return FE_BTN_SELECT;
     case AKEYCODE_BACK: case AKEYCODE_MENU: case AKEYCODE_ESCAPE: case AKEYCODE_BUTTON_MODE:
         return FE_BTN_MENU;
-    case AKEYCODE_BUTTON_L1: case AKEYCODE_BUTTON_L2: return FE_BTN_L;
-    case AKEYCODE_BUTTON_R1: case AKEYCODE_BUTTON_R2: case AKEYCODE_M: return FE_BTN_R;
     default: return 0;
     }
 }
@@ -715,6 +542,17 @@ static int handle_input(app_t *a, AInputEvent *e)
         a->ay = axis_or_zero(e, AMOTION_EVENT_AXIS_Y);
         a->hx = axis_or_zero(e, AMOTION_EVENT_AXIS_HAT_X);
         a->hy = axis_or_zero(e, AMOTION_EVENT_AXIS_HAT_Y);
+        /* analog triggers (some handhelds have no L2/R2 key events) */
+        float lt = fmaxf(axis_or_zero(e, AMOTION_EVENT_AXIS_LTRIGGER),
+                         axis_or_zero(e, AMOTION_EVENT_AXIS_BRAKE));
+        float rt = fmaxf(axis_or_zero(e, AMOTION_EVENT_AXIS_RTRIGGER),
+                         axis_or_zero(e, AMOTION_EVENT_AXIS_GAS));
+        uint32_t old = a->trig;
+        if (lt > 0.5f) a->trig |= FE_BTN_L2;
+        else if (lt < 0.3f) a->trig &= ~(uint32_t)FE_BTN_L2;
+        if (rt > 0.5f) a->trig |= FE_BTN_R2;
+        else if (rt < 0.3f) a->trig &= ~(uint32_t)FE_BTN_R2;
+        a->latched |= a->trig & ~old; /* a short pull still counts */
         pthread_mutex_unlock(&a->mu);
         return 1;
     }
@@ -875,6 +713,7 @@ static void clear_input(app_t *a)
     a->keys = 0;
     a->latched = 0;
     a->fire_touched = 0;
+    a->trig = 0;
     a->ax = a->ay = a->hx = a->hy = 0.0f;
     for (int i = 0; i < MAX_POINTERS; i++)
         a->touch[i].active = 0;
@@ -961,6 +800,7 @@ static void *on_save_state(ANativeActivity *act, size_t *size)
 }
 
 static void lj_log_android(const char *msg) { LOGI("%s", msg); }
+static void gl_log_android(const char *msg) { LOGE("%s", msg); }
 
 JNIEXPORT void ANativeActivity_onCreate(ANativeActivity *act, void *saved, size_t saved_size)
 {
@@ -995,6 +835,7 @@ JNIEXPORT void ANativeActivity_onCreate(ANativeActivity *act, void *saved, size_
     act->callbacks->onInputQueueDestroyed = on_input_destroyed;
     ANativeActivity_setWindowFlags(act, AWINDOW_FLAG_KEEP_SCREEN_ON | AWINDOW_FLAG_FULLSCREEN, 0);
     lj_set_log(lj_log_android);
+    glview_set_log(gl_log_android);
     if (pthread_create(&a->thread, NULL, game_main, a) == 0)
         a->thread_started = 1;
     else

@@ -61,7 +61,7 @@ LIBDIR=$SYSROOT/usr/lib/aarch64-linux-android/$MIN_SDK
 # ---- native library -----------------------------------------------------
 CPP=$ROOT/android/app/src/main/cpp
 RT=$ROOT/runtime
-SRC="$CPP/main.c $CPP/audio.c $RT/mem.c $RT/cpu_interp.c $RT/vic.c $RT/cia.c
+SRC="$CPP/main.c $CPP/audio.c $CPP/glview.c $RT/mem.c $RT/cpu_interp.c $RT/vic.c $RT/cia.c
      $RT/sid.c $RT/kernal.c $RT/basic_rnd.c $RT/machine.c $RT/palette.c
      $RT/lj_extras.c $ROOT/frontend/fe.c"
 if [ -n "$GEN" ]; then

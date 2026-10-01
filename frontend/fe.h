@@ -1,7 +1,7 @@
 /*
- * fe.h - portable front end: menu, settings, save states, input mapping
- * and frame composition. Platform layers (Android) feed input, call
- * fe_frame() at 50.125 Hz, display fe_rgba() and play fe_audio_read().
+ * fe.h - portable front end: menu, settings, save states, input mapping,
+ * enhancements and frame composition. Platform layers (Android) feed input,
+ * call fe_frame() at 50.125 Hz, display fe_rgba() and play fe_audio_read().
  */
 #ifndef LJ_FE_H
 #define LJ_FE_H
@@ -13,20 +13,43 @@
 extern "C" {
 #endif
 
-/* logical buttons */
+/* physical buttons (what the platform layer reports) */
 enum {
     FE_BTN_UP = 1 << 0,
     FE_BTN_DOWN = 1 << 1,
     FE_BTN_LEFT = 1 << 2,
     FE_BTN_RIGHT = 1 << 3,
-    FE_BTN_FIRE = 1 << 4,    /* A */
-    FE_BTN_FIRE2 = 1 << 5,   /* B */
-    FE_BTN_FIRE3 = 1 << 6,   /* X, Y */
-    FE_BTN_START = 1 << 7,
-    FE_BTN_SELECT = 1 << 8,
-    FE_BTN_MENU = 1 << 9,    /* Back key, Menu key */
-    FE_BTN_L = 1 << 10,
-    FE_BTN_R = 1 << 11,
+    FE_BTN_A = 1 << 4,
+    FE_BTN_B = 1 << 5,
+    FE_BTN_X = 1 << 6,
+    FE_BTN_Y = 1 << 7,
+    FE_BTN_L1 = 1 << 8,
+    FE_BTN_R1 = 1 << 9,
+    FE_BTN_L2 = 1 << 10,
+    FE_BTN_R2 = 1 << 11,
+    FE_BTN_START = 1 << 12,
+    FE_BTN_SELECT = 1 << 13,
+    FE_BTN_MENU = 1 << 14,   /* Back, Menu, Esc: always opens the menu */
+    FE_BTN_TOUCH_FIRE = 1 << 15, /* fire area of the touch screen: always fire */
+};
+
+/* the buttons that can be mapped, in this order */
+enum {
+    FE_MAP_A, FE_MAP_B, FE_MAP_X, FE_MAP_Y, FE_MAP_L1, FE_MAP_R1,
+    FE_MAP_L2, FE_MAP_R2, FE_MAP_START, FE_MAP_SELECT, FE_MAP_COUNT
+};
+
+/* what a mapped button does */
+enum {
+    FE_ACT_NONE,
+    FE_ACT_FIRE,    /* joystick fire */
+    FE_ACT_PAUSE,   /* C64 key P: the game's pause */
+    FE_ACT_MUSIC,   /* C64 key M: the game's music on/off */
+    FE_ACT_MENU,    /* this menu */
+    FE_ACT_FAST,    /* fast forward while held */
+    FE_ACT_SAVE,    /* quick save to the current slot */
+    FE_ACT_LOAD,    /* quick load from the current slot */
+    FE_ACT_COUNT
 };
 
 typedef struct {
@@ -35,8 +58,11 @@ typedef struct {
 } fe_input_t;
 
 enum { FE_SCALE_FIT = 0, FE_SCALE_INTEGER, FE_SCALE_STRETCH, FE_SCALE_COUNT };
-enum { FE_FILTER_SHARP = 0, FE_FILTER_NEAREST, FE_FILTER_SMOOTH, FE_FILTER_COUNT };
+enum { FE_FILTER_SHARP = 0, FE_FILTER_NEAREST, FE_FILTER_SMOOTH, FE_FILTER_SCANLINES,
+       FE_FILTER_COUNT };
 enum { FE_BORDER_FULL = 0, FE_BORDER_SMALL, FE_BORDER_NONE, FE_BORDER_COUNT };
+
+#define FE_SLOTS 4
 
 typedef struct {
     int scale;      /* FE_SCALE_* */
@@ -45,7 +71,11 @@ typedef struct {
     int sound;      /* 0 off, 1 on */
     int volume;     /* 1..10 */
     int autoresume; /* resume the last session on start */
-    int bfire;      /* B button: 1 = fire, 0 = opens the menu */
+    int map[FE_MAP_COUNT]; /* FE_ACT_* for each mappable button */
+    int autofire;   /* fire repeats while held */
+    int slot;       /* save state slot 1..FE_SLOTS */
+    int inf_lives;  /* cheat: lives are not used up */
+    int ff_speed;   /* fast forward speed 2..4 */
 } fe_settings_t;
 
 #define FE_W 384
@@ -71,6 +101,7 @@ int fe_menu_open(void);
 /* touch support: map a tap at (x, y) in image coordinates while the menu
  * is open; returns 1 if it hit a menu line */
 int fe_menu_tap(int x, int y);
+uint32_t fe_best_score(void);          /* saved high score */
 
 #ifdef __cplusplus
 }

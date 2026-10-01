@@ -30,7 +30,7 @@ else()
     set(GAME ${LJ_ROOT}/runtime/recomp_stub.c ${LJ_ROOT}/runtime/nogame.c)
 endif()
 
-add_library(lazyjones SHARED main.c audio.c ${RUNTIME} ${GAME})
+add_library(lazyjones SHARED main.c audio.c glview.c ${RUNTIME} ${GAME})
 target_include_directories(lazyjones PRIVATE ${LJ_ROOT}/runtime ${LJ_ROOT}/frontend ${CMAKE_CURRENT_SOURCE_DIR})
 set_target_properties(lazyjones PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 # -ffp-contract=off: no fused multiply-add, so the sound is bit-identical
