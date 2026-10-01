@@ -177,4 +177,23 @@ int lj_state_load(const void *buf, size_t len)
 
 uint64_t lj_clock(void) { return C.clk; }
 const uint8_t *lj_debug_ram(void) { return C.ram; }
+
+/* FNV-1a over the observable machine state (for A/B tests) */
+uint32_t lj_debug_hash(void)
+{
+    uint32_t h = 2166136261u;
+#define H(p, n) do { const uint8_t *q_ = (const uint8_t *)(p); for (size_t i_ = 0; i_ < (n); i_++) { h ^= q_[i_]; h *= 16777619u; } } while (0)
+    H(C.ram, sizeof C.ram);
+    H(C.colorram, sizeof C.colorram);
+    H(&C.cpu.a, 1); H(&C.cpu.x, 1); H(&C.cpu.y, 1); H(&C.cpu.sp, 1);
+    H(&C.cpu.pc, 2);
+    uint8_t p = (uint8_t)((C.cpu.fn & 0x80) | (C.cpu.fv << 6) | (C.cpu.fd << 3) | (C.cpu.fi << 2) | ((C.cpu.fz == 0) << 1) | C.cpu.fc);
+    H(&p, 1);
+    H(&C.clk, sizeof C.clk);
+    H(C.fb, sizeof C.fb);
+    H(C.vic.regs, sizeof C.vic.regs);
+    H(C.sid.regs, sizeof C.sid.regs);
+#undef H
+    return h;
+}
 uint32_t lj_frame_count(void) { return C.frame_count; }

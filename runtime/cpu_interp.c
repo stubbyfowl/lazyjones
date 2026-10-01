@@ -10,6 +10,12 @@
 
 static const uint8_t op_len[256] = LJ_OPLEN_TABLE;
 
+#ifdef LJ_TRACE
+#define TRACE_TARGET(pc) trace_mark_target(pc)
+#else
+#define TRACE_TARGET(pc) do { } while (0)
+#endif
+
 void cpu_reset_regs(void)
 {
     C.cpu.a = C.cpu.x = C.cpu.y = 0;
@@ -49,6 +55,11 @@ void cpu_interp_step(void)
         op1 = RD((uint16_t)(pc + 1), 1);
     if (len == 3)
         op16 = (uint16_t)(op1 | (RD((uint16_t)(pc + 2), 2) << 8));
+#ifdef LJ_TRACE
+    if (lj_trace)
+        trace_exec(pc, op, op1, (uint8_t)(op16 >> 8), len,
+                   !(LJ_IS_PLAIN_RAM(pc) || rmap[pc >> 8] == &C.ram[pc & 0xFF00]));
+#endif
 
     switch (op) {
 #include "cpu_interp_gen.inc"
@@ -83,6 +94,7 @@ void cpu_interp_step(void)
         C.cpu.pc = (uint16_t)(lo | (hi << 8));
         C.clk += 6;
         cpu_irq_recheck_now();
+        TRACE_TARGET(C.cpu.pc);
         break;
     }
     case 0x60: { /* RTS */
@@ -90,6 +102,7 @@ void cpu_interp_step(void)
         uint8_t hi = cpu_pull();
         C.cpu.pc = (uint16_t)((lo | (hi << 8)) + 1);
         C.clk += 6;
+        TRACE_TARGET(C.cpu.pc);
         break;
     }
     case 0x4C: /* JMP abs */
@@ -101,6 +114,7 @@ void cpu_interp_step(void)
         uint8_t hi = RD((uint16_t)((op16 & 0xFF00) | ((op16 + 1) & 0x00FF)), 4);
         C.cpu.pc = (uint16_t)(lo | (hi << 8));
         C.clk += 5;
+        TRACE_TARGET(C.cpu.pc);
         break;
     }
     case 0x10: cpu_branch(!(C.cpu.fn & 0x80), pc, op1); break; /* BPL */
@@ -140,6 +154,7 @@ static void cpu_interrupt(uint16_t vector, int is_nmi)
     uint8_t hi = RD((uint16_t)(vector + 1), 6);
     C.cpu.pc = (uint16_t)(lo | (hi << 8));
     C.clk += 7;
+    TRACE_TARGET(C.cpu.pc);
     (void)is_nmi;
 }
 
@@ -171,6 +186,7 @@ int cpu_take_interrupt(void)
 }
 
 void machine_events(void);
+extern int lj_recomp_enabled;
 
 void cpu_run(uint64_t until)
 {
@@ -189,7 +205,7 @@ void cpu_run(uint64_t until)
                 C.clk = C.ev;
             continue;
         }
-        if (!recomp_run())
+        if (!(lj_recomp_enabled && recomp_run()))
             cpu_interp_step();
     }
 }

@@ -112,6 +112,8 @@ typedef struct {
     double cycles_per_sample;
     double sample_frac;
     float facc, fcnt;   /* sum and count of chip cycles of this sample */
+    float last_out;     /* analog output, updated every second cycle */
+    uint8_t phase;
     float lp, bp;       /* state variable filter */
     float dc_hp_x, dc_hp_y;
     uint8_t bus_value;  /* value last written (read of write-only regs) */

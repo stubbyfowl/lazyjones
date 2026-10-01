@@ -175,64 +175,74 @@ static void sid_clock(uint64_t n)
     float vol = (float)(mode & 0x0F);
     int v3off = (mode & 0x80) && !(filt & 0x04);
     float facc = S.facc, cnt = S.fcnt;
+    /* registers do not change during this call: decode them once */
+    uint32_t freq[3];
+    uint8_t ctrl[3], test[3];
+    for (int vi = 0; vi < 3; vi++) {
+        freq[vi] = (uint32_t)(S.regs[vi * 7] | (S.regs[vi * 7 + 1] << 8));
+        ctrl[vi] = S.regs[vi * 7 + 4];
+        test[vi] = ctrl[vi] & 0x08;
+    }
+    int any_sync = ((ctrl[0] | ctrl[1] | ctrl[2]) & 0x02) != 0;
+    const float w2 = 2.0f * w0dt; /* the analog part runs every 2nd cycle */
 
     for (uint64_t i = 0; i < n; i++) {
         /* oscillators */
         uint32_t msb_rise = 0;
         for (int vi = 0; vi < 3; vi++) {
-            sid_voice_t *v = &S.v[vi];
-            uint8_t ctrl = S.regs[vi * 7 + 4];
-            if (ctrl & 0x08)
+            if (test[vi])
                 continue;
-            uint32_t freq = (uint32_t)(S.regs[vi * 7] | (S.regs[vi * 7 + 1] << 8));
+            sid_voice_t *v = &S.v[vi];
             uint32_t prev = v->acc;
-            v->acc = (prev + freq) & 0xFFFFFF;
-            if (!(prev & 0x800000) && (v->acc & 0x800000))
+            uint32_t acc = (prev + freq[vi]) & 0xFFFFFF;
+            v->acc = acc;
+            uint32_t rise = ~prev & acc;
+            if (rise & 0x800000)
                 msb_rise |= 1u << vi;
-            if (!(prev & 0x080000) && (v->acc & 0x080000)) {
+            if (rise & 0x080000) {
                 uint32_t sh = v->noise;
-                uint32_t b = ((sh >> 22) ^ (sh >> 17)) & 1;
-                v->noise = ((sh << 1) & 0x7FFFFF) | b;
+                v->noise = ((sh << 1) & 0x7FFFFF) | (((sh >> 22) ^ (sh >> 17)) & 1);
             }
         }
         /* hard sync: a rising MSB of the source resets the destination */
-        if (msb_rise) {
+        if (msb_rise && any_sync) {
             for (int vi = 0; vi < 3; vi++) {
                 int src = (vi + 2) % 3;
-                uint8_t ctrl = S.regs[vi * 7 + 4];
-                uint8_t sctrl = S.regs[src * 7 + 4];
-                if ((ctrl & 0x02) && (msb_rise & (1u << src)) &&
-                    !((sctrl & 0x02) && (msb_rise & (1u << ((src + 2) % 3)))))
+                if ((ctrl[vi] & 0x02) && (msb_rise & (1u << src)) &&
+                    !((ctrl[src] & 0x02) && (msb_rise & (1u << ((src + 2) % 3)))))
                     S.v[vi].acc = 0;
             }
         }
-        /* envelopes and voice outputs */
-        float vo[3];
-        for (int vi = 0; vi < 3; vi++) {
-            sid_voice_t *v = &S.v[vi];
-            env_clock(v, vi);
-            uint16_t w = wave_out(vi);
-            v->out12 = w;
-            vo[vi] = (((float)w - wave_zero) * (float)v->env + voice_dc) * (1.0f / 128.0f);
+        for (int vi = 0; vi < 3; vi++)
+            env_clock(&S.v[vi], vi);
+
+        S.phase ^= 1;
+        if (S.phase) {
+            /* voice outputs, mixer and filter */
+            float vo[3];
+            for (int vi = 0; vi < 3; vi++) {
+                uint16_t w = wave_out(vi);
+                vo[vi] = (((float)w - wave_zero) * (float)S.v[vi].env + voice_dc) * (1.0f / 128.0f);
+            }
+            if (v3off)
+                vo[2] = 0;
+            float vi_f = 0, vnf = 0;
+            for (int k = 0; k < 3; k++) {
+                if (filt & (1 << k))
+                    vi_f += vo[k];
+                else
+                    vnf += vo[k];
+            }
+            float hp = S.bp * inv_q - S.lp - vi_f;
+            S.bp -= w2 * hp;
+            S.lp -= w2 * S.bp;
+            float vf = 0;
+            if (mode & 0x10) vf += S.lp;
+            if (mode & 0x20) vf += S.bp;
+            if (mode & 0x40) vf += hp;
+            S.last_out = (vnf + vf + mixer_dc) * vol;
         }
-        if (v3off)
-            vo[2] = 0;
-        float vi_f = 0, vnf = 0;
-        for (int k = 0; k < 3; k++) {
-            if (filt & (1 << k))
-                vi_f += vo[k];
-            else
-                vnf += vo[k];
-        }
-        /* state variable filter */
-        float hp = S.bp * inv_q - S.lp - vi_f;
-        S.bp -= w0dt * hp;
-        S.lp -= w0dt * S.bp;
-        float vf = 0;
-        if (mode & 0x10) vf += S.lp;
-        if (mode & 0x20) vf += S.bp;
-        if (mode & 0x40) vf += hp;
-        facc += (vnf + vf + mixer_dc) * vol;
+        facc += S.last_out;
         cnt += 1.0f;
 
         S.sample_frac += 1.0;

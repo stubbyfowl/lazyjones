@@ -69,6 +69,7 @@ static void wav_header(FILE *f, uint32_t samples)
 }
 
 extern int lj_debug_flags;
+extern int lj_recomp_enabled;
 const uint8_t *lj_debug_ram(void);
 int lj_game_init(int sample_rate) __attribute__((weak));
 uint32_t lj_debug_hash(void) __attribute__((weak));
@@ -90,6 +91,7 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--hash")) hash = 1;
         else if (!strcmp(argv[i], "--dumpram")) dumpram = argv[++i];
         else if (!strcmp(argv[i], "--debug")) lj_debug_flags = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--interp")) lj_recomp_enabled = 0;
         else if (!strcmp(argv[i], "--shot")) {
             char *s = argv[++i];
             for (char *t = strtok(s, ","); t && nshots < 256; t = strtok(NULL, ","))

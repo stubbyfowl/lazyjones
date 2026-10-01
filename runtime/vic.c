@@ -91,90 +91,109 @@ static void cfetch(void)
 
 /* ---- rendering ---------------------------------------------------------- */
 
-static void render_graphics(int p0, int p1)
+/* Colours and foreground flags of the 8 pixels of display column i. */
+static void column_pixels(int i, uint16_t base, uint8_t *col8, uint8_t *fg8)
 {
     uint8_t d011 = V.regs[0x11], d016 = V.regs[0x16], d018 = V.regs[0x18];
     int ecm = (d011 >> 6) & 1, bmm = (d011 >> 5) & 1, mcm = (d016 >> 4) & 1;
-    int xs = d016 & 7;
+    uint8_t b0c = V.regs[0x21] & 15;
+    uint8_t c, col, g;
+    if (V.display_state) {
+        c = V.cbuf[i];
+        col = V.colbuf[i];
+        uint16_t a;
+        if (bmm)
+            a = (uint16_t)(((d018 & 0x08) << 10) | (((V.vc + i) & 0x3FF) << 3) | V.rc);
+        else
+            a = (uint16_t)(((d018 & 0x0E) << 10) | ((ecm ? (c & 0x3F) : c) << 3) | V.rc);
+        if (ecm)
+            a &= 0x39FF;
+        g = vic_mem(base, a);
+    } else {
+        c = 0;
+        col = 0;
+        g = vic_mem(base, ecm ? 0x39FF : 0x3FFF);
+    }
+    int invalid = ecm && (bmm || mcm); /* invalid modes show black */
+    if (!(mcm && (bmm || (col & 8)))) {
+        uint8_t c0, c1;
+        if (bmm) {
+            c0 = c & 15;
+            c1 = c >> 4;
+        } else if (ecm) {
+            c0 = V.regs[0x21 + (c >> 6)] & 15;
+            c1 = col;
+        } else {
+            c0 = b0c;
+            c1 = (uint8_t)(mcm ? (col & 7) : col);
+        }
+        if (invalid)
+            c0 = c1 = 0;
+        for (int k = 0; k < 8; k++) {
+            int bit = (g >> (7 - k)) & 1;
+            fg8[k] = (uint8_t)bit;
+            col8[k] = bit ? c1 : c0;
+        }
+    } else {
+        uint8_t cc[4];
+        cc[0] = b0c;
+        if (bmm) {
+            cc[1] = c >> 4;
+            cc[2] = c & 15;
+            cc[3] = col;
+        } else {
+            cc[1] = V.regs[0x22] & 15;
+            cc[2] = V.regs[0x23] & 15;
+            cc[3] = col & 7;
+        }
+        if (invalid)
+            cc[0] = cc[1] = cc[2] = cc[3] = 0;
+        for (int k = 0; k < 8; k++) {
+            int b = (g >> (6 - (k & 6))) & 3;
+            fg8[k] = (uint8_t)(b >> 1);
+            col8[k] = cc[b];
+        }
+    }
+}
+
+static void render_graphics(int p0, int p1)
+{
+    int xs = V.regs[0x16] & 7;
     uint8_t b0c = V.regs[0x21] & 15;
     int first = P_DISPLAY + xs, last = P_DISPLAY + 320 + xs;
-    uint16_t base = vic_bank_base();
 
-    if (V.vborder) {
-        /* the sequencer is switched off inside the vertical border */
+    if (V.vborder || p1 <= first || p0 >= last) {
+        /* the sequencer is switched off inside the vertical border; outside
+         * the 40 columns only the background colour is shown */
         memset(&g_col[p0], b0c, (size_t)(p1 - p0));
         memset(&g_fg[p0], 0, (size_t)(p1 - p0));
         return;
     }
-    if (V.badline && V.display_state && p1 > first)
+    if (V.badline && V.display_state)
         cfetch();
-
+    if (p0 < first) {
+        memset(&g_col[p0], b0c, (size_t)(first - p0));
+        memset(&g_fg[p0], 0, (size_t)(first - p0));
+        p0 = first;
+    }
+    int end = p1 < last ? p1 : last;
+    uint16_t base = vic_bank_base();
     int p = p0;
-    while (p < p1) {
-        if (p < first || p >= last) {
-            g_col[p] = b0c;
-            g_fg[p] = 0;
-            p++;
-            continue;
-        }
+    while (p < end) {
         int i = (p - first) >> 3;
-        int bit0 = (p - first) & 7;
-        uint8_t c, col, g;
-        if (V.display_state) {
-            c = V.cbuf[i];
-            col = V.colbuf[i];
-            uint16_t a;
-            if (bmm)
-                a = (uint16_t)(((d018 & 0x08) << 10) | (((V.vc + i) & 0x3FF) << 3) | V.rc);
-            else
-                a = (uint16_t)(((d018 & 0x0E) << 10) | ((ecm ? (c & 0x3F) : c) << 3) | V.rc);
-            if (ecm)
-                a &= 0x39FF;
-            g = vic_mem(base, a);
-        } else {
-            c = 0;
-            col = 0;
-            g = vic_mem(base, ecm ? 0x39FF : 0x3FFF);
-        }
-        int n = 8 - bit0;
-        if (p + n > p1)
-            n = p1 - p;
-        for (int k = bit0; k < bit0 + n; k++, p++) {
-            uint8_t pix, fg;
-            int multi = mcm && (bmm || (col & 8));
-            if (!multi) {
-                int b = (g >> (7 - k)) & 1;
-                fg = (uint8_t)b;
-                if (bmm)
-                    pix = b ? (c >> 4) : (c & 15);
-                else if (ecm)
-                    pix = b ? col : (V.regs[0x21 + (c >> 6)] & 15);
-                else
-                    pix = b ? (uint8_t)(mcm ? (col & 7) : col) : b0c;
-            } else {
-                int b = (g >> (6 - (k & 6))) & 3;
-                fg = (uint8_t)(b >= 2);
-                if (bmm) {
-                    switch (b) {
-                    case 0: pix = b0c; break;
-                    case 1: pix = c >> 4; break;
-                    case 2: pix = c & 15; break;
-                    default: pix = col; break;
-                    }
-                } else {
-                    switch (b) {
-                    case 0: pix = b0c; break;
-                    case 1: pix = V.regs[0x22] & 15; break;
-                    case 2: pix = V.regs[0x23] & 15; break;
-                    default: pix = col & 7; break;
-                    }
-                }
-            }
-            if (ecm && (bmm || mcm))
-                pix = 0; /* invalid modes show black */
-            g_col[p] = pix;
-            g_fg[p] = fg;
-        }
+        int k0 = (p - first) & 7;
+        int n = 8 - k0;
+        if (p + n > end)
+            n = end - p;
+        uint8_t col8[8], fg8[8];
+        column_pixels(i, base, col8, fg8);
+        memcpy(&g_col[p], &col8[k0], (size_t)n);
+        memcpy(&g_fg[p], &fg8[k0], (size_t)n);
+        p += n;
+    }
+    if (p1 > last) {
+        memset(&g_col[last], b0c, (size_t)(p1 - last));
+        memset(&g_fg[last], 0, (size_t)(p1 - last));
     }
 }
 
@@ -276,19 +295,28 @@ static void render_seg(int p0, int p1, int pl, int pr)
     uint8_t ec = V.regs[0x20] & 15;
     int row = FB_ROW(V.line);
     uint8_t *out = (row >= 0 && row < FB_H) ? C.fb[row] : NULL;
-    for (int p = p0; p < p1; p++) {
+    int p = p0;
+    while (p < p1) {
+        /* the right border compare switches the main border on at pr */
+        int q = (p < pr && pr < p1) ? pr : p1;
         if (p == pr)
             V.mborder = 1;
-        if (!out || p < FB_P0 || p >= FB_P0 + FB_W)
-            continue;
-        uint8_t pix;
-        if (V.mborder)
-            pix = ec;
-        else if (s_mask[p] && !(s_prio[p] && g_fg[p]))
-            pix = s_col[p];
-        else
-            pix = g_col[p];
-        out[p - FB_P0] = pix;
+        if (out) {
+            int a = p < FB_P0 ? FB_P0 : p;
+            int b = q > FB_P0 + FB_W ? FB_P0 + FB_W : q;
+            if (a < b) {
+                uint8_t *o = &out[a - FB_P0];
+                if (V.mborder) {
+                    memset(o, ec, (size_t)(b - a));
+                } else if (!V.disp) {
+                    memcpy(o, &g_col[a], (size_t)(b - a));
+                } else {
+                    for (int x = a; x < b; x++)
+                        *o++ = (s_mask[x] && !(s_prio[x] && g_fg[x])) ? s_col[x] : g_col[x];
+                }
+            }
+        }
+        p = q;
     }
 }
 

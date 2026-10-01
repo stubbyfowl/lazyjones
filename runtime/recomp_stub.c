@@ -2,5 +2,6 @@
 #include "c64.h"
 
 const int recomp_available = 0;
+int lj_recomp_enabled = 0;
 
 int recomp_run(void) { return 0; }

@@ -11,6 +11,7 @@
 #define LJ_CPU_OPS_H
 
 #include "c64.h"
+#include "trace.h"
 
 #define SETNZ(v) (C.cpu.fn = C.cpu.fz = (uint8_t)(v))
 
@@ -22,6 +23,7 @@
 
 LJ_INLINE uint8_t RD(uint16_t a, unsigned off)
 {
+    TRACE_READ(a);
     if (LJ_IS_PLAIN_RAM(a))
         return C.ram[a];
     const uint8_t *p = rmap[a >> 8];
@@ -32,6 +34,7 @@ LJ_INLINE uint8_t RD(uint16_t a, unsigned off)
 
 LJ_INLINE void WR(uint16_t a, uint8_t v, unsigned off)
 {
+    TRACE_WRITE(a);
     if (LJ_IS_PLAIN_RAM(a)) {
         if (LJ_UNLIKELY(C.code_byte[a]))
             mem_wr_code(a, v);
@@ -64,6 +67,7 @@ LJ_INLINE void DWR(uint16_t a, uint8_t v, unsigned off)
 
 LJ_INLINE uint8_t ZRD(uint8_t a)
 {
+    TRACE_READ(a);
     if (LJ_UNLIKELY(a < 2))
         return mem_rd_slow(a, 0);
     return C.ram[a];
@@ -71,6 +75,7 @@ LJ_INLINE uint8_t ZRD(uint8_t a)
 
 LJ_INLINE void ZWR(uint8_t a, uint8_t v)
 {
+    TRACE_WRITE(a);
     if (LJ_UNLIKELY(a < 2))
         mem_wr_slow(a, v, 0);
     else if (LJ_UNLIKELY(C.code_byte[a]))
@@ -101,6 +106,7 @@ LJ_INLINE void cpu_set_p(uint8_t p)
 LJ_INLINE void cpu_push(uint8_t v)
 {
     uint16_t a = (uint16_t)(0x100 | C.cpu.sp);
+    TRACE_WRITE(a);
     if (LJ_UNLIKELY(C.code_byte[a]))
         mem_wr_code(a, v);
     else
@@ -111,6 +117,7 @@ LJ_INLINE void cpu_push(uint8_t v)
 LJ_INLINE uint8_t cpu_pull(void)
 {
     C.cpu.sp++;
+    TRACE_READ((uint16_t)(0x100 | C.cpu.sp));
     return C.ram[0x100 | C.cpu.sp];
 }
 
