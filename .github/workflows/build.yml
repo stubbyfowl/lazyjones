@@ -1,0 +1,183 @@
+# CI: host tests (x86-64 and arm64), the Android app built with Gradle and
+# the NDK, the same app built with tools/apkbuild (no NDK), and a start test
+# on the Android emulator.
+#
+# The game is copyrighted and is NOT in this repository, so CI builds the
+# app WITHOUT the game ("no game" message screen). Everything that is not
+# game data is tested here.
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  KLAUS_COMMIT: 7954e2dbb49c469ea286070bf46cdd71aeb29e4b
+  KLAUS_SHA256: fa12bfc761e6f9057e4cc01a665a7b800ff01ae91f598af1e39a1201d01953fd
+  SST_COMMIT: 2f6980a2d95757486c7bee24355c360e40e2a224
+
+jobs:
+  host:
+    name: Host tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generated CPU files are up to date
+        run: |
+          python3 tools/gen_cpu_ops.py | cmp - runtime/cpu_ops_gen.h
+          python3 tools/gen_cpu_ops.py --interp | cmp - runtime/cpu_interp_gen.inc
+
+      - name: Python files compile
+        run: python3 -m py_compile tools/ljrecomp/*.py tools/gen_cpu_ops.py tools/apkbuild/mksysroot.py tests/ss_convert.py
+
+      - name: Build (no warnings allowed)
+        run: |
+          make -C host all tests 2>&1 | tee build.log
+          if grep -q "warning:" build.log; then echo "compiler warnings"; exit 1; fi
+
+      - name: Front end test (app without the game)
+        run: host/fetest_nogame "$RUNNER_TEMP/fe"
+
+      - name: 6502 functional test (Klaus Dormann)
+        run: |
+          curl -sSfL --retry 4 -o "$RUNNER_TEMP/klaus.bin" \
+            "https://raw.githubusercontent.com/Klaus2m5/6502_65C02_functional_tests/$KLAUS_COMMIT/bin_files/6502_functional_test.bin"
+          echo "$KLAUS_SHA256  $RUNNER_TEMP/klaus.bin" | sha256sum -c
+          tests/cpu_klaus "$RUNNER_TEMP/klaus.bin"
+
+      - name: 6502 single step tests (part of SingleStepTests/65x02)
+        run: |
+          mkdir -p "$RUNNER_TEMP/sst/json"
+          # decimal mode ADC/SBC, undocumented opcodes, control flow, stack,
+          # page crossing and read-modify-write
+          for op in 61 65 69 6d 71 75 79 7d e1 e5 e9 ed f1 f5 f9 fd eb \
+                    03 0b 23 2b 43 4b 63 6b 8b 93 9b 9c 9e 9f a3 ab b3 bb cb e3 \
+                    00 20 40 60 4c 6c 08 28 48 68 10 30 50 70 90 b0 d0 f0 \
+                    91 99 9d b1 b9 bc bd be 1e 3e 5e 7e de fe; do
+            curl -sSfL --retry 4 -o "$RUNNER_TEMP/sst/json/$op.json" \
+              "https://raw.githubusercontent.com/SingleStepTests/65x02/$SST_COMMIT/6502/v1/$op.json"
+          done
+          python3 tests/ss_convert.py "$RUNNER_TEMP/sst/json" "$RUNNER_TEMP/sst/bin"
+          tests/cpu_ss "$RUNNER_TEMP/sst/bin"
+
+  android:
+    name: Android APK (Gradle + NDK, no game)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Build
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon --stacktrace
+      - name: Check the APK
+        run: |
+          APK=android/app/build/outputs/apk/release/app-release.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$BT/aapt2" dump badging "$APK" | tee badging.txt
+          grep -q "package: name='io.github.stubbyfowl.lazyjones'" badging.txt
+          grep -q "native-code: 'arm64-v8a'" badging.txt
+          "$BT/apksigner" verify --verbose "$APK"
+          "$BT/zipalign" -c -p 4 "$APK"
+          unzip -o -q "$APK" lib/arm64-v8a/liblazyjones.so -d apk
+          NDK=$(ls -d "$ANDROID_HOME"/ndk/* | sort -V | tail -n 1)
+          RE="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          "$RE" -h -l -d -n apk/lib/arm64-v8a/liblazyjones.so
+          # 16 KB page support: every LOAD segment aligned to 0x4000
+          if "$RE" -l apk/lib/arm64-v8a/liblazyjones.so | awk '$1=="LOAD" && $NF!="0x4000"' | grep -q .; then
+            echo "LOAD segment not 16 KB aligned"; exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lazyjones-nogame-gradle
+          path: android/app/build/outputs/apk/release/app-release.apk
+
+  apkbuild:
+    name: APK without the NDK (tools/apkbuild), compared with Gradle
+    needs: android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm aapt apksigner zipalign android-libnativehelper-dev
+      - name: Fetch sources and make the sysroot
+        run: |
+          tools/apkbuild/fetch_sources.sh "$RUNNER_TEMP/aosp"
+          python3 tools/apkbuild/mksysroot.py --src "$RUNNER_TEMP/aosp" --out "$RUNNER_TEMP/sysroot"
+      - name: Build the APK
+        run: |
+          tools/apkbuild/build_apk.sh --sysroot "$RUNNER_TEMP/sysroot" \
+            --res-jar "$RUNNER_TEMP/aosp/android-res.jar" --out "$RUNNER_TEMP/nondk.apk" \
+            --work "$RUNNER_TEMP/work"
+      - uses: actions/download-artifact@v4
+        with:
+          name: lazyjones-nogame-gradle
+          path: gradle-apk
+      - name: Same imports and app data as the Gradle build
+        run: |
+          unzip -o -q gradle-apk/app-release.apk lib/arm64-v8a/liblazyjones.so -d g
+          llvm-nm -D --undefined-only g/lib/arm64-v8a/liblazyjones.so | awk '{print $2}' | sort > gradle.txt
+          llvm-nm -D --undefined-only "$RUNNER_TEMP/work/liblazyjones.so" | awk '{print $2}' | sort > nondk.txt
+          llvm-nm -D --defined-only g/lib/arm64-v8a/liblazyjones.so | awk '{print $3}' > gradle_exp.txt
+          llvm-nm -D --defined-only "$RUNNER_TEMP/work/liblazyjones.so" | awk '{print $3}' > nondk_exp.txt
+          echo "imports only in the Gradle build / only in the no-NDK build:"
+          diff gradle.txt nondk.txt
+          diff gradle_exp.txt nondk_exp.txt
+          # (release builds of Gradle shorten resource file names: icon paths differ)
+          for f in gradle-apk/app-release.apk "$RUNNER_TEMP/nondk.apk"; do
+            aapt2 dump badging "$f" | grep -v -E "^package:|^application-icon|^application:" > "$(basename "$f").badging"
+          done
+          diff app-release.apk.badging nondk.apk.badging
+          aapt2 dump badging gradle-apk/app-release.apk | grep "^package:" | sed 's/ platformBuild.*//' > a.txt
+          aapt2 dump badging "$RUNNER_TEMP/nondk.apk" | grep "^package:" | sed 's/ platformBuild.*//' > b.txt
+          diff a.txt b.txt
+
+  emulator:
+    name: Start test on the Android emulator
+    needs: android
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: lazyjones-nogame-gradle
+          path: apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install, start, quit
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # x86_64 Google APIs images of Android 11 run arm64 apps (ARM translation)
+          api-level: 30
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          disable-animations: true
+          script: tools/ci/emulator_test.sh apk/app-release.apk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-log
+          path: |
+            logcat.txt
+            screen.raw
+          if-no-files-found: ignore
