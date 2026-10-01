@@ -119,9 +119,17 @@ def save(path, code, info):
         'entry': '%04X' % info.get('entry', 0x080D),
         'instructions': [['%04X' % a, code[a]] for a in sorted(code)],
     }
+    # compact form: eight instructions per line keeps the file small and
+    # still gives readable diffs
+    items = [json.dumps(i) for i in out['instructions']]
+    lines = [', '.join(items[i:i + 8]) for i in range(0, len(items), 8)]
     with open(path, 'w') as f:
-        json.dump(out, f, indent=0)
-        f.write('\n')
+        f.write('{\n')
+        for k in ('game', 'note', 'entry'):
+            f.write('  %s: %s,\n' % (json.dumps(k), json.dumps(out[k])))
+        f.write('  "instructions": [\n    ')
+        f.write(',\n    '.join(lines))
+        f.write('\n  ]\n}\n')
 
 
 def load(path):

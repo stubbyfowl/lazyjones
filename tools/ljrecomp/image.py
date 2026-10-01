@@ -192,25 +192,25 @@ def restore_texts(mem, log):
         mem[0x2BA4:0x2BAD] = _petscii('THE  TURK')
         mem[0x2BAD] = ord('S')
         log('restored room name "THE  TURKS"')
-    # Title credits: two text lines between cursor control codes, ending
-    # with HOME ($13). Rebuild them with the same total length.
-    old = bytes(mem[0x9F18:0x9F5F])
-    if len(old) == 71 and old[-1] == 0x13:
+    # Title credits: 72 bytes at $9F18-$9F5F, printed after "LAZY JONES".
+    # They start with cursor moves, contain two text lines and end with
+    # HOME ($13); a zero byte at $9F60 ends the string. All releases keep
+    # this frame, so it is rebuilt with the same length and moves.
+    old = bytes(mem[0x9F18:0x9F60])
+    if len(old) == 72 and old[-1] == 0x13 and old[:8] == bytes([0x1D] * 5 + [0x11] * 3) \
+            and mem[0x9F60] == 0x00:
         line1 = 'BY DAVID WHITTAKER'
-        line2 = 'TERMINAL SOFTWARE'
+        line2 = 'TERMINAL SOFTWARE 1984'
         new = bytearray()
-        new += bytes([0x1D] * 5 + [0x11] * 3)
-        new += _petscii(line1.center(22))
-        new += bytes([0x8D, 0x11, 0x11, 0x9A])
-        new += bytes([0x1D] * 9)
+        new += bytes([0x1D] * 5 + [0x11] * 3)          # same start as before
+        new += _petscii(line1)                         # yellow, columns 11-28
+        new += bytes([0x8D, 0x11, 0x11, 0x9A])          # next line, light blue
+        new += bytes([0x1D] * ((40 - len(line2)) // 2))
         new += _petscii(line2)
-        pad = 71 - 1 - len(new)
-        if pad < 0:
-            raise GameFileError('credit text too long')
-        new += b' ' * pad
-        new += bytes([0x13])
-        assert len(new) == 71
-        mem[0x9F18:0x9F5F] = new
+        new += bytes([0x9A] * (72 - 1 - len(new)))      # padding: colour code
+        new += bytes([0x13])                            # HOME
+        assert len(new) == 72
+        mem[0x9F18:0x9F60] = new
         log('replaced crack credits on the title screen')
     return mem
 
