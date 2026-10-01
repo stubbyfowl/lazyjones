@@ -1,0 +1,41 @@
+# Game files are copyrighted. Never commit them (see README).
+game/*
+!game/README.md
+*.d64
+*.t64
+*.prg
+*.crt
+*.tap
+*.sid
+*.z80
+
+# generated from the game file at build time
+build/
+android/app/src/main/cpp/generated/
+
+# host build outputs
+host/ljrun_interp
+host/ljrun_game
+host/ljexplore
+tests/cpu_klaus
+tests/cpu_ss
+tests/*.o
+*.o
+*.ppm
+*.wav
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+*.aab
+*.keystore
+*.jks
+!android/debug-placeholder.txt
+
+# Python
+__pycache__/
+*.pyc
