@@ -39,15 +39,19 @@ CODENAMES = {
 FUTURE = 10000
 MODE_TAGS = ('llndk', 'apex', 'systemapi')
 
-# library name -> symbol file (relative to the sources dir)
+# library name -> (symbol file relative to the sources dir, versioned)
+# "versioned" follows the ndk_library modules in the AOSP Android.bp files:
+# libandroid, liblog, libEGL and libGLESv2 have unversioned_until: "current",
+# so their NDK stubs have no symbol versions at all. libc, libm and libdl
+# use the default and are versioned.
 LIBS = {
-    'libc': 'bionic/libc/libc.map.txt',
-    'libm': 'bionic/libm/libm.map.txt',
-    'libdl': 'bionic/libdl/libdl.map.txt',
-    'liblog': 'misc/liblog.map.txt',
-    'libandroid': 'misc/libandroid.map.txt',
-    'libEGL': 'native/opengl/libs/libEGL.map.txt',
-    'libGLESv2': 'native/opengl/libs/libGLESv2.map.txt',
+    'libc': ('bionic/libc/libc.map.txt', True),
+    'libm': ('bionic/libm/libm.map.txt', True),
+    'libdl': ('bionic/libdl/libdl.map.txt', True),
+    'liblog': ('misc/liblog.map.txt', False),
+    'libandroid': ('misc/libandroid.map.txt', False),
+    'libEGL': ('native/opengl/libs/libEGL.map.txt', False),
+    'libGLESv2': ('native/opengl/libs/libGLESv2.map.txt', False),
 }
 
 
@@ -176,7 +180,7 @@ def omit_symbol(tags, api):
     return omit_tags(tags, api)
 
 
-def make_stub(name, map_path, api, outdir, clang, keep):
+def make_stub(name, map_path, versioned, api, outdir, clang, keep):
     versions = parse_map(map_path)
     asm = ['\t.text']
     script = []
@@ -225,11 +229,12 @@ def make_stub(name, map_path, api, outdir, clang, keep):
         f.write('\n'.join(script) + '\n')
     out = os.path.join(outdir, name + '.so')
     cmd = [clang, '--target=%s%d' % (TRIPLE, api), '-shared', '-nostdlib',
-           '-fuse-ld=lld', '-Wl,--version-script=' + v_path,
-           '-Wl,-soname,' + name + '.so', '-Wl,--hash-style=both',
+           '-fuse-ld=lld', '-Wl,-soname,' + name + '.so', '-Wl,--hash-style=both',
            '-o', out, s_path]
+    if versioned:
+        cmd.insert(5, '-Wl,--version-script=' + v_path)
     subprocess.check_call(cmd)
-    print('  %-12s %5d symbols' % (name + '.so', count))
+    print('  %-12s %5d symbols%s' % (name + '.so', count, '' if versioned else ', unversioned'))
 
 
 def copy_tree(src, dst, skip=()):
@@ -308,8 +313,8 @@ def main():
     print('headers')
     make_headers(a.src, a.out)
     print('stub libraries (API %d)' % a.api)
-    for name, rel in LIBS.items():
-        make_stub(name, os.path.join(a.src, rel), a.api, libdir, a.clang, keep)
+    for name, (rel, versioned) in LIBS.items():
+        make_stub(name, os.path.join(a.src, rel), versioned, a.api, libdir, a.clang, keep)
     print('crt objects')
     make_crt(a.src, a.out, libdir, a.api, a.clang, keep)
     print('sysroot ready: %s' % a.out)
