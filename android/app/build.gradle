@@ -1,0 +1,87 @@
+plugins {
+    id 'com.android.application'
+}
+
+// ---- the game file and the recompiler -----------------------------------
+// The game is not part of the repository. tools/ljrecomp reads your copy
+// (.d64 or .prg) and writes C sources into build/generated/lazyjones.
+def repoRoot = rootProject.file('..')
+def genDir = new File(buildDir, 'generated/lazyjones')
+
+def findGame = {
+    def p = project.findProperty('ljGame')
+    if (p) {
+        def f = file(p)
+        if (!f.isFile())
+            throw new GradleException("ljGame: file not found: ${f}")
+        return f
+    }
+    def dir = new File(repoRoot, 'game')
+    def files = (dir.listFiles() ?: []).findAll {
+        it.isFile() && (it.name.toLowerCase().endsWith('.d64') || it.name.toLowerCase().endsWith('.prg'))
+    }.sort { it.name }
+    return files ? files[0] : null
+}
+def gameFile = findGame()
+if (gameFile == null)
+    logger.warn('Lazy Jones: no game file found in game/ (and -PljGame not set). ' +
+                'The app will be built WITHOUT the game and only show a message.')
+
+android {
+    namespace 'io.github.stubbyfowl.lazyjones'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'io.github.stubbyfowl.lazyjones'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments "-DLJ_GEN_DIR=${gameFile != null ? genDir.absolutePath : ''}"
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Signed with the local debug key so the APK installs directly.
+            // Use your own key before publishing anywhere.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}
+
+def generateGameSources = tasks.register('generateGameSources', Exec) {
+    description = 'Recompile the game file into C sources'
+    onlyIf { gameFile != null }
+    if (gameFile != null) {
+        inputs.file(gameFile)
+        inputs.dir(new File(repoRoot, 'tools/ljrecomp'))
+        outputs.dir(genDir)
+        commandLine (project.findProperty('ljPython') ?: 'python3'),
+                new File(repoRoot, 'tools/ljrecomp').absolutePath,
+                'build', '--game', gameFile.absolutePath, '--out', genDir.absolutePath
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn generateGameSources
+}
