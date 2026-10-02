@@ -23,9 +23,14 @@ images.) The game files are copyrighted and are never in the repository.
   rest is hashed (SHA-1). All three releases give the same hash, so they
   contain the same game code.
 - The cracked releases changed some text. The build puts the original text
-  back: the title credits ("BY DAVID WHITTAKER / TERMINAL SOFTWARE 1984",
-  rebuilt with exactly the same length and cursor codes, 72 bytes) and the
-  room name "THE  TURKS".
+  back, byte for byte: the title credit line "© TERMINAL SOFTWARE INTL. LTD
+  MCMLXXXIV" (72 bytes with the colour and cursor codes; it fills the block
+  exactly) and, in the DKS release, the room name "THE  TURK". The
+  original text comes from a screenshot of the original title screen on
+  C64-Wiki, read character by character with the game's own font (the ©
+  sign is screen code `$40`, the dot after "INTL" is screen code `$00`).
+  The port's title screen was then compared with that screenshot: all
+  1,000 character cells are the same, letter and colour.
 
 ## 3. The C64 runtime (`runtime/`)
 
@@ -135,6 +140,8 @@ first and turns the hooks off for an unknown copy.
 | Sound rate control worked the wrong way | code review | sign of the correction |
 | App hung on quit | code review | release the window before `finish()` |
 | Title credits 71 instead of 72 bytes | screenshot | rebuilt with the exact length |
+| Title credit line was a guess ("TERMINAL SOFTWARE 1984") | screenshot of the original title on C64-Wiki | the original line, byte for byte; every character cell compared |
+| DKS room name fix wrote "THE  TURKS": the extra S overwrote the HOME code that ends the text | the original "THE  TURK" on C64-Wiki, then the bytes of the S8 and CMM releases | write only the 9 letters; all three releases now have the same bytes there |
 | `AWINDOW_FLAG_*` not defined | first build with real NDK headers | include `<android/window.h>` |
 | Sound ring buffer: two threads moved the read index | code review | only the audio thread moves it; the game thread asks for a flush |
 | Stick or touch "stuck" after leaving the app | code review | clear all input on pause and focus loss |

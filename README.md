@@ -13,6 +13,12 @@
   <img alt="Java: none" src="https://img.shields.io/badge/Java-none-lightgrey">
 </p>
 
+<p align="center">
+  <img src="docs/img/c64-wiki/LazyJones_Animation.gif" width="576" alt="Lazy Jones walks through the hotel">
+  <br>
+  <sub>The hotel. Animation: <a href="docs/img/c64-wiki/CREDITS.md">C64-Wiki</a>, GFDL.</sub>
+</p>
+
 **Lazy Jones** is the Commodore 64 game by David Whittaker (Terminal
 Software, 1984): a lazy hotel worker sneaks into the rooms of a three-floor
 hotel to play 15 different video games.
@@ -55,6 +61,63 @@ flowchart LR
     APP["Android layer<br/>OpenGL ES 2, AAudio, input"] --> CC
     CC --> APK["liblazyjones.so<br/>in the APK"]
 ```
+
+## The 15 games
+
+The hotel has 18 rooms on three floors. In 14 guest rooms Lazy Jones finds a
+game console, and the hotel bar is a game too. Walk in, play until the time
+runs out, and go on to the next room.
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_res_q.gif" width="256" alt="Res Q"><br><b>Res Q</b><br><sub>Rescue the people in the cave with a backpack helicopter.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_eggie_chuck.gif" width="256" alt="Eggie Chuck"><br><b>Eggie Chuck</b><br><sub>Collect all the eggs and do not get caught.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_laser_jones.gif" width="256" alt="Laser Jones"><br><b>Laser Jones</b><br><sub>Shoot the invaders.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_jay_walk.gif" width="256" alt="Jay Walk"><br><b>Jay Walk</b><br><sub>Cross the busy street to the girl and back.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_the_wall.gif" width="256" alt="The Wall"><br><b>The Wall</b><br><sub>Make the wall as long as you can without a crash.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_wild_wafers.gif" width="256" alt="Wild Wafers"><br><b>Wild Wafers</b><br><sub>Shoot the wafers.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_star_dust.gif" width="256" alt="Star Dust"><br><b>Star Dust</b><br><sub>Shoot the asteroids.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_outland.gif" width="256" alt="Outland"><br><b>Outland</b><br><sub>A shoot 'em up.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_scoot.gif" width="256" alt="Scoot"><br><b>Scoot</b><br><sub>Land on all the platforms.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_wipe_out.gif" width="256" alt="Wipe Out"><br><b>Wipe Out</b><br><sub>Break through the wall with the ball.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_the_hills_are_alive.gif" width="256" alt="The Hills Are Alive"><br><b>The Hills Are Alive</b><br><sub>Fly over the hills and shoot.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_99_red_balloons.gif" width="256" alt="99 Red Balloons"><br><b>99 Red Balloons</b><br><sub>Float up to the top with the balloons.</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_the_reflex.gif" width="256" alt="The Reflex"><br><b>The Reflex</b><br><sub>Keep the sticks in the air.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_the_turk.gif" width="256" alt="The Turk"><br><b>The Turk</b><br><sub>Hit the turkey with the fork.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_bar.gif" width="256" alt="The bar"><br><b>The bar</b><br><sub>Get to your drink past the drunk.</sub></td>
+  </tr>
+</table>
+
+The rooms without a game:
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_nightmare_2.gif" width="256" alt="Nightmare"><br><b>Nightmare</b><br><sub>Too many video games.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_besenkammer.gif" width="256" alt="The broom closet"><br><b>The broom closet</b><br><sub>Lazy Jones does not sweep.</sub></td>
+    <td align="center" width="33%"><img src="docs/img/c64-wiki/Lazy_jones_klo.gif" width="256" alt="The toilet"><br><b>The toilet</b><br><sub>A break with no guilt.</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots of the original game from <a href="docs/img/c64-wiki/CREDITS.md">C64-Wiki</a>
+(uploaded by Worf), GFDL.</sub>
+
+## Faithful to the original
+
+The cracked disk images that exist today changed the credit line of the
+title screen. This port puts the original line back, byte for byte. Left:
+the original title screen (C64-Wiki). Right: this port. All 1,000 character
+cells (letter and colour) are the same; only the colour palette of the two
+emulators differs.
+
+![Original title screen and this port](docs/img/title_compare.png)
 
 ## Screens
 
@@ -193,8 +256,8 @@ images. Other copies are not tested: for them the build shows "unknown
 release". They work only if their game code is the same.
 
 These cracked releases changed some text. The build puts the original text
-back: the title shows "BY DAVID WHITTAKER / TERMINAL SOFTWARE 1984", and
-the name of the room "THE  TURKS" is correct. Use
+back, byte for byte: the title credit line "© TERMINAL SOFTWARE INTL. LTD
+MCMLXXXIV" and, in the DKS release, the room name "THE  TURK". Use
 `python3 tools/ljrecomp build --no-text-fix ...` to keep the text of your
 copy.
 
@@ -287,3 +350,7 @@ by step, with every problem found and how it was fixed.
 - Colodore palette by Philip "Pepto" Timmermann.
 - 8x8 font: public domain, by Daniel Hepper.
 - 6502 tests: Klaus Dormann; SingleStepTests by Tom Harte and others.
+- Screenshots and the hotel animation of the original game: C64-Wiki
+  (c64-wiki.de), uploaded by Worf and Werner, under the GNU Free
+  Documentation License. See
+  [docs/img/c64-wiki/CREDITS.md](docs/img/c64-wiki/CREDITS.md).
