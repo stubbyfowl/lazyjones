@@ -25,7 +25,7 @@ GAME_SIGNATURE = bytes([0xA9, 0x08, 0x20, 0xD2, 0xFF, 0xA9, 0x1D, 0x8D, 0x18, 0x
 # texts or because a release was saved after the game had run (variables).
 VARYING_RANGES = [
     (0x0801, 0x080D),   # BASIC line
-    (0x2BA4, 0x2BAD),   # name of one room ("THE  TURKS")
+    (0x2BA4, 0x2BAD),   # name of one room ("THE  TURK")
     (0x2E40, 0x2EE0),   # sprite data order in one release
     (0x3340, 0x3348),   # one character definition
     (0x540C, 0x540D),   # variable
@@ -181,37 +181,44 @@ def _petscii(s):
 
 
 def restore_texts(mem, log):
-    """Undo cracker text changes where the original is known.
+    """Undo cracker text changes.
 
-    The DKS release renamed the room "THE  TURKS" to "DKS INC". All releases
-    replaced the title screen credits with their crack group; the credits
-    are set to the author and publisher instead (same length and layout).
+    The originals were checked against the releases that kept them and
+    against screenshots of the original game (C64-Wiki), character by
+    character with the game's own font.
     """
+    # Room name: 9 characters at $2BA4-$2BAC, then HOME ($13) at $2BAD.
+    # The DKS release wrote "DKS INC" there; Section 8 and CMM kept
+    # "THE  TURK" (two spaces).
     room = mem[0x2BA4:0x2BAD]
     if room != _petscii('THE  TURK'):
         mem[0x2BA4:0x2BAD] = _petscii('THE  TURK')
-        mem[0x2BAD] = ord('S')
-        log('restored room name "THE  TURKS"')
-    # Title credits: 72 bytes at $9F18-$9F5F, printed after "LAZY JONES".
-    # They start with cursor moves, contain two text lines and end with
-    # HOME ($13); a zero byte at $9F60 ends the string. All releases keep
-    # this frame, so it is rebuilt with the same length and moves.
+        log('restored room name "THE  TURK"')
+    # Title credits: 72 bytes at $9F18-$9F5F, printed after "LAZY JONES";
+    # a zero byte at $9F60 ends the string. All releases keep the frame
+    # (cursor moves, "BY DAVID WHITTAKER", end with HOME) and replaced the
+    # second line with their crack group. The original second line (row 17):
+    #   (c) TERMINAL SOFTWARE INTL. LTD MCMLXXXIV
+    # with the (c) in light blue, the name in light red and the year in light
+    # blue. In the game's font, screen code $40 (PETSCII $C0) is the (c)
+    # sign and screen code $00 (PETSCII $40, "@") is the dot after "INTL".
+    # These bytes fill the 72 bytes exactly.
     old = bytes(mem[0x9F18:0x9F60])
     if len(old) == 72 and old[-1] == 0x13 and old[:8] == bytes([0x1D] * 5 + [0x11] * 3) \
             and mem[0x9F60] == 0x00:
-        line1 = 'BY DAVID WHITTAKER'
-        line2 = 'TERMINAL SOFTWARE 1984'
         new = bytearray()
         new += bytes([0x1D] * 5 + [0x11] * 3)          # same start as before
-        new += _petscii(line1)                         # yellow, columns 11-28
-        new += bytes([0x8D, 0x11, 0x11, 0x9A])          # next line, light blue
-        new += bytes([0x1D] * ((40 - len(line2)) // 2))
-        new += _petscii(line2)
-        new += bytes([0x9A] * (72 - 1 - len(new)))      # padding: colour code
+        new += _petscii('BY DAVID WHITTAKER')          # yellow, row 14, columns 11-28
+        new += bytes([0x8D, 0x11, 0x11])                # row 17, column 0
+        new += bytes([0x9A, 0xC0, 0x20])                # light blue (c), space
+        new += bytes([0x96])                            # light red
+        new += _petscii('TERMINAL SOFTWARE INTL') + bytes([0x40]) + _petscii(' LTD ')
+        new += bytes([0x9A]) + _petscii('MCMLXXXIV')    # light blue
         new += bytes([0x13])                            # HOME
-        assert len(new) == 72
+        if len(new) != 72:
+            raise GameFileError('credits rebuild has %d bytes, not 72' % len(new))
         mem[0x9F18:0x9F60] = new
-        log('replaced crack credits on the title screen')
+        log('restored the original title credits')
     return mem
 
 
