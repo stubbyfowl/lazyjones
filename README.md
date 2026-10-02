@@ -1,19 +1,72 @@
-# Lazy Jones for Android (arm64)
+<h1 align="center">Lazy Jones for Android</h1>
 
-A native Android port of **Lazy Jones**, the Commodore 64 game by David
-Whittaker (Terminal Software, 1984).
+<p align="center">
+  <b>The 1984 Commodore 64 classic, statically recompiled from 6502 machine code to native arm64.</b>
+</p>
 
-The 6502 game code is **statically recompiled** to C and then compiled to
-arm64 machine code. A small C64 runtime written in C (VIC-II video, SID
-sound, CIA timers, a replacement KERNAL) does the work of the C64 hardware.
-The app is one native library in a NativeActivity: no Java code, no
-emulator app. It runs on Android phones, tablets, TVs and Android
-handhelds, with gamepad support.
+<p align="center">
+  <a href="https://github.com/stubbyfowl/lazyjones/actions/workflows/build.yml"><img alt="build" src="https://github.com/stubbyfowl/lazyjones/actions/workflows/build.yml/badge.svg?branch=claude/lazy-jones-android-arm64-xsahcg"></a>
+  <img alt="Android 7.0+" src="https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white">
+  <img alt="ABI arm64-v8a" src="https://img.shields.io/badge/ABI-arm64--v8a-blue">
+  <img alt="C11" src="https://img.shields.io/badge/language-C11-A8B9CC?logo=c&logoColor=white">
+  <img alt="6502 static recompiler" src="https://img.shields.io/badge/6502%20%E2%86%92%20C-static%20recompiler-orange">
+  <img alt="Java: none" src="https://img.shields.io/badge/Java-none-lightgrey">
+</p>
+
+**Lazy Jones** is the Commodore 64 game by David Whittaker (Terminal
+Software, 1984): a lazy hotel worker sneaks into the rooms of a three-floor
+hotel to play 15 different video games.
+
+In this port, no emulator interprets the game code. A recompiler translates
+the 6502 machine instructions of the game into C, and the C code is compiled
+to arm64 for Android. A small C64 runtime written in C (VIC-II video, SID sound, CIA
+timers, a replacement KERNAL) does the work of the C64 hardware. The app is
+one native library in a NativeActivity: no Java code, no emulator app. It
+runs on Android phones, tablets, TVs and Android handhelds, with gamepad
+support.
 
 > **The game is not in this repository.** Lazy Jones is copyrighted. You
 > need your own copy of the game (a `.d64` disk image or a `.prg` file).
 > The build reads it and puts the recompiled game into your APK. Do not
 > publish an APK that contains the game.
+
+## At a glance
+
+| | |
+|---|---|
+| Game instructions recompiled to C | 9,134 |
+| CPU tests passed | 2,440,000 single step tests, plus Klaus Dormann's functional test |
+| Recompiled code against the interpreter | same machine state in every frame |
+| arm64 build against the x86-64 build | same picture, state and sound, bit for bit |
+| Front end and drawing checks | 148 + 34, all pass |
+| Lines of Java | 0 |
+| APK size with the game | about 410 KB |
+| Frame rate | 50.125 Hz, exact PAL timing |
+
+```mermaid
+flowchart LR
+    GAME["Your game file<br/>.d64 or .prg"] --> UNPACK["Unpack<br/>(6502 CPU in Python)"]
+    UNPACK --> RECOMP["Recompiler<br/>tools/ljrecomp"]
+    MAP["Code map<br/>(addresses only)"] --> RECOMP
+    RECOMP --> GEN["Game code as C<br/>+ game memory image"]
+    GEN --> CC["clang / NDK<br/>arm64"]
+    RT["C64 runtime<br/>CPU, VIC-II, SID, CIA, KERNAL"] --> CC
+    FE["Front end<br/>menus, enhancements"] --> CC
+    APP["Android layer<br/>OpenGL ES 2, AAudio, input"] --> CC
+    CC --> APK["liblazyjones.so<br/>in the APK"]
+```
+
+## Screens
+
+The in-game menu: main page, button mapping and enhancements. The game
+pauses and stays visible, dimmed, behind the menu.
+
+![The menu pages](docs/img/menus.png)
+
+The picture filters, both drawn by the app's OpenGL ES 2 shaders: **sharp**
+(crisp pixels at any screen size) and **scanlines** (like a CRT).
+
+![Sharp filter and scanline filter](docs/img/filters.png)
 
 ## Features
 
@@ -206,7 +259,9 @@ contains the game.
 | CI: Gradle and NDK build, build without NDK, start test on the Android emulator | see `.github/workflows/build.yml` |
 
 See [docs/TESTING.md](docs/TESTING.md) for the details and for how to run
-the tests with your copy of the game.
+the tests with your copy of the game, and
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for how the port was made, step
+by step, with every problem found and how it was fixed.
 
 ## Files
 
